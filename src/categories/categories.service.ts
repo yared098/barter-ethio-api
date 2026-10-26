@@ -15,7 +15,7 @@ export class CategoriesService {
     return this.prisma.category.findMany({
       orderBy: { name: 'asc' },
       include: {
-        _count: { select: { products: true, wishes: true } },
+        _count: { select: { products: true, wanted: true } },
       },
     });
   }
@@ -24,7 +24,7 @@ export class CategoriesService {
     const category = await this.prisma.category.findUnique({
       where: { id },
       include: {
-        _count: { select: { products: true, wishes: true } },
+        _count: { select: { products: true, wanted: true } },
       },
     });
     if (!category) throw new NotFoundException('Category not found');
@@ -35,38 +35,36 @@ export class CategoriesService {
     const exists = await this.prisma.category.findUnique({
       where: { slug: dto.slug },
     });
-    if (exists) throw new ConflictException(`Category with slug "${dto.slug}" already exists`);
-
+    if (exists) {
+      throw new ConflictException(`Category with slug "${dto.slug}" already exists`);
+    }
     return this.prisma.category.create({ data: dto });
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
     await this.findOne(id);
-
     if (dto.slug) {
       const clash = await this.prisma.category.findFirst({
         where: { slug: dto.slug, NOT: { id } },
       });
-      if (clash) throw new ConflictException(`Category with slug "${dto.slug}" already exists`);
+      if (clash) {
+        throw new ConflictException(`Category with slug "${dto.slug}" already exists`);
+      }
     }
-
     return this.prisma.category.update({ where: { id }, data: dto });
   }
 
   async remove(id: string) {
     await this.findOne(id);
-
     const counts = await this.prisma.category.findUnique({
       where: { id },
-      include: { _count: { select: { products: true, wishes: true } } },
+      include: { _count: { select: { products: true, wanted: true } } },
     });
-
-    if (counts && (counts._count.products > 0 || counts._count.wishes > 0)) {
+    if (counts && (counts._count.products > 0 || counts._count.wanted > 0)) {
       throw new ConflictException(
-        'Cannot delete category that still has products or wishes',
+        'Cannot delete category that still has products or product wants',
       );
     }
-
     await this.prisma.category.delete({ where: { id } });
     return { ok: true };
   }

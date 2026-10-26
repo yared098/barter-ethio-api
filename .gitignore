@@ -1,14 +1,67 @@
+# ─────────────────────────────────────────────
+# Dependencies
+# ─────────────────────────────────────────────
 node_modules/
+.pnpm-store/
+
+# ─────────────────────────────────────────────
+# Build output
+# ─────────────────────────────────────────────
 dist/
+build/
+*.tsbuildinfo
+.next/
+
+# ─────────────────────────────────────────────
+# Environment (NEVER commit secrets)
+# ─────────────────────────────────────────────
 .env
-.env.local
+.env.*
+!.env.example
+
+# ─────────────────────────────────────────────
+# Firebase / service accounts (contains private key)
+# ─────────────────────────────────────────────
+firebase-service-account*.json
+*-firebase-adminsdk-*.json
+secrets/
+
+# ─────────────────────────────────────────────
+# User uploads (uploaded files, not source)
+# ─────────────────────────────────────────────
+uploads/
+!uploads/.gitkeep
+
+# ─────────────────────────────────────────────
+# Database artifacts
+# ─────────────────────────────────────────────
+prisma/migrations/dev.db*
+*.sqlite
+*.sqlite3
+*.db
+
+# ─────────────────────────────────────────────
+# Logs and temporary files
+# ─────────────────────────────────────────────
 *.log
-.DS_Store
-coverage/
-.vscode/
-.idea/
-prisma/migrations/dev.db*uploads/
+logs/
 *.bak
 *.backup
-secrets/
-*.json
+tmp/
+temp/
+
+# ─────────────────────────────────────────────
+# Testing / coverage
+# ─────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─────────────────────────────────────────────
+# OS / editor files
+# ─────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo

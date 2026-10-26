@@ -1,14 +1,6 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn } from 'class-validator';
 
-export class CreateOfferDto {
-  @IsString()
-  offeredProductId!: string;
-
-  @IsString()
-  requestedProductId!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  message?: string;
+export class OfferActionDto {
+  @IsIn(['accept', 'decline', 'cancel', 'complete'])
+  action!: 'accept' | 'decline' | 'cancel' | 'complete';
 }

@@ -1,22 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { FirebaseService } from '../firebase/firebase.service';
 
 export interface NotificationPayload {
   title: string;
   body: string;
-  data?: Record<string, string>; // deep-link data: { offerId, productId, screen }
+  data?: Record<string, string>;
 }
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firebase: FirebaseService,
+  ) {}
 
-  /**
-   * Sends a push notification to all of the user's devices.
-   * Currently logs only — Firebase wiring is one function below.
-   */
   async sendToUser(userId: string, payload: NotificationPayload): Promise<void> {
     const tokens = await this.prisma.deviceToken.findMany({
       where: { userId },
@@ -24,24 +24,66 @@ export class NotificationsService {
     });
 
     if (!tokens.length) {
-      this.logger.log(`[SKIP] user=${userId} has no device tokens`);
+      this.logger.debug(`[SKIP] user=${userId} has no device tokens`);
       return;
     }
 
-    // 🔥 FIREBASE WIRING GOES HERE — replace the loop below with:
-    //   await this.firebase.messaging().sendEachForMulticast({
-    //     tokens: tokens.map(t => t.token),
-    //     notification: { title: payload.title, body: payload.body },
-    //     data: payload.data,
-    //   });
-    for (const t of tokens) {
+    const tokenStrings = tokens.map((t) => t.token);
+
+    if (!this.firebase.isReady || !this.firebase.messaging) {
       this.logger.log(
-        `[PUSH→${t.platform}] user=${userId} | ${payload.title} | ${payload.body} | data=${JSON.stringify(payload.data ?? {})}`,
+        `[DRY-RUN] user=${userId} tokens=${tokens.length} | "${payload.title}" — ${payload.body}`,
+      );
+      return;
+    }
+
+    try {
+      const response = await this.firebase.messaging.sendEachForMulticast({
+        tokens: tokenStrings,
+        notification: { title: payload.title, body: payload.body },
+        data: payload.data,
+        android: { priority: 'high' },
+        apns: { payload: { aps: { sound: 'default' } } },
+      });
+
+      this.logger.log(
+        `[PUSH] user=${userId} success=${response.successCount}/${tokenStrings.length} | "${payload.title}"`,
+      );
+
+      if (response.failureCount > 0) {
+        const deadTokens: string[] = [];
+        response.responses.forEach((r, i) => {
+          if (!r.success) {
+            const code = r.error?.code;
+            if (
+              code === 'messaging/invalid-registration-token' ||
+              code === 'messaging/registration-token-not-registered'
+            ) {
+              deadTokens.push(tokenStrings[i]);
+            } else {
+              this.logger.warn(
+                `[PUSH-FAIL] token=${tokenStrings[i].slice(0, 12)}... code=${code}`,
+              );
+            }
+          }
+        });
+
+        if (deadTokens.length > 0) {
+          await this.prisma.deviceToken.deleteMany({
+            where: { token: { in: deadTokens } },
+          });
+          this.logger.log(
+            `[CLEANUP] removed ${deadTokens.length} dead token(s) for user=${userId}`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error(
+        `[PUSH-ERROR] user=${userId}: ${(err as Error).message}`,
+        (err as Error).stack,
       );
     }
   }
-
-  // ─── Typed helpers (call these from business logic) ───
 
   async offerReceived(
     receiverId: string,
@@ -80,11 +122,7 @@ export class NotificationsService {
     });
   }
 
-  async offerCompleted(
-    otherUserId: string,
-    offerId: string,
-    message: string,
-  ) {
+  async offerCompleted(otherUserId: string, offerId: string, message: string) {
     await this.sendToUser(otherUserId, {
       title: 'Swap complete ✅',
       body: message,
