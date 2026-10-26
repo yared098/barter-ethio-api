@@ -1,9 +1,0 @@
-allowBuilds:
-  '@firebase/util': false
-  '@nestjs/core': false
-  '@prisma/client': false
-  '@prisma/engines': false
-  argon2: false
-  bcrypt: false
-  prisma: false
-  protobufjs: false

@@ -1,0 +1,50 @@
+# Dependencies (reinstalled inside image)
+node_modules
+.pnpm-store
+**/node_modules
+
+# Build output
+dist
+.next
+*.tsbuildinfo
+
+# Env (secrets injected at runtime)
+.env
+.env.*
+!.env.docker
+!.env.example
+
+# Logs
+*.log
+logs
+
+# OS / editor
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Test / coverage
+coverage
+.nyc_output
+
+# Uploads (mounted as volume, not baked in)
+uploads
+!uploads/.gitkeep
+
+# Docker / CI (not needed in image)
+docker-compose*.yml
+Dockerfile
+.dockerignore
+.github
+firebase-service-account*.json
+*-firebase-adminsdk-*.json
+
+# Docs
+*.md
+!README.md
+
+# Workspace files (not needed in Docker build context)
+pnpm-workspace.yaml
