@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { CategoriesModule } from './categories/categories.module';
 import { FirebaseModule } from './firebase/firebase.module';
+import { HealthModule } from './health/health.module';
 import { MatchesModule } from './matches/matches.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OffersModule } from './offers/offers.module';
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { envValidationSchema } from './config/env.validation';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -32,7 +34,9 @@ import { envValidationSchema } from './config/env.validation';
     ]),
 
     PrismaModule,
+    RedisModule,
     FirebaseModule,
+    HealthModule,
     NotificationsModule,
     AuthModule,
     UsersModule,
