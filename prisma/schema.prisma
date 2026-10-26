@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// USER + AUTH
+// ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  image        String?
+  passwordHash String?
+  googleId     String?  @unique
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+
+  // ─── Tier / monetization ───
+  tier         Tier     @default(FREE)
+  proExpiresAt DateTime?          // null = free forever; date = pro until then
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens  RefreshToken[]
+  products       Product[]
+  sentOffers     BarterOffer[] @relation("sender")
+  receivedOffers BarterOffer[] @relation("receiver")
+  subscriptions  Subscription[]
+  deviceTokens  DeviceToken[]
+  sentMessages  Message[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Subscription {
+  id        String   @id @default(cuid())
+  userId    String
+  plan      Tier
+  amount    Float
+  currency  String   @default("USD")
+  startedAt DateTime @default(now())
+  endsAt    DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────
+// CATALOG
+// ─────────────────────────────────────────────
+
+model Category {
+  id       String          @id @default(cuid())
+  slug     String          @unique
+  name     String
+  icon     String?
+  products Product[]
+  wanted   ProductWanted[]
+}
+
+model Product {
+  id             String        @id @default(cuid())
+  title          String
+  description    String
+  images         String[]
+  condition      Condition
+  estimatedValue Float
+  status         ProductStatus @default(AVAILABLE)
+
+  ownerId    String
+  categoryId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id])
+
+  // What this product wants in exchange (many)
+  wants ProductWanted[]
+
+  offersAsOffered   BarterOffer[] @relation("offered")
+  offersAsRequested BarterOffer[] @relation("requested")
+
+  @@index([ownerId, status])
+  @@index([categoryId, status])
+}
+
+// One product can want many categories
+model ProductWanted {
+  id         String   @id @default(cuid())
+  productId  String
+  categoryId String
+  keywords   String?  // free text hint: "Samsung S24 Ultra", "Nike size 42"
+  minValue   Float?   // optional value range
+  maxValue   Float?
+  createdAt  DateTime @default(now())
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id])
+
+  @@index([productId])
+  @@index([categoryId])
+}
+
+// ─────────────────────────────────────────────
+// BARTER
+// ─────────────────────────────────────────────
+
+model BarterOffer {
+  id                 String      @id @default(cuid())
+  senderId           String
+  receiverId         String
+  offeredProductId   String
+  requestedProductId String
+  status             OfferStatus @default(PENDING)
+  message            String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  sender           User    @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver         User    @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  offeredProduct   Product @relation("offered", fields: [offeredProductId], references: [id])
+  requestedProduct Product @relation("requested", fields: [requestedProductId], references: [id])
+  messages Message[]
+
+
+  @@index([senderId, status])
+  @@index([receiverId, status])
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Tier {
+  FREE
+  PRO
+}
+
+enum Condition {
+  NEW
+  LIKE_NEW
+  GOOD
+  FAIR
+}
+
+enum ProductStatus {
+  AVAILABLE
+  PENDING
+  SWAPPED
+}
+
+enum OfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  COMPLETED
+  CANCELLED
+} 
+
+model Message {
+  id        String   @id @default(cuid())
+  offerId   String
+  senderId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  offer  BarterOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  sender User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, createdAt])
+}
+
+model DeviceToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  platform   String   // "ios" | "android" | "web"
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
