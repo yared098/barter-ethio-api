@@ -17,6 +17,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { PrismaModule } from './prisma/prisma.module';
 import { envValidationSchema } from './config/env.validation';
 import { RedisModule } from './redis/redis.module';
+import { AnalysisModule } from './analysis/analysis.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { RedisModule } from './redis/redis.module';
     MatchesModule,
     OffersModule,
     UploadsModule,
+    AnalysisModule
   ],
   providers: [
     // ─── Guard order matters (top → bottom) ───

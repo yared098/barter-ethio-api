@@ -84,6 +84,28 @@ export class NotificationsService {
       );
     }
   }
+    /** AI discovered a match for this user's wants. */
+  async aiMatchFound(
+    userId: string,
+    data: {
+      productTitle: string;
+      productId: string;
+      ownerName: string;
+      score: number;
+      reason: string;
+    },
+  ) {
+    const emoji = data.score >= 90 ? '🎯' : data.score >= 75 ? '⭐' : '🔔';
+    await this.sendToUser(userId, {
+      title: `${emoji} ${data.score}% match for you`,
+      body: `${data.ownerName} posted "${data.productTitle}" — ${data.reason}`,
+      data: {
+        type: 'match.found',
+        productId: data.productId,
+        screen: 'product-detail',
+      },
+    });
+  }
 
   async offerReceived(
     receiverId: string,
