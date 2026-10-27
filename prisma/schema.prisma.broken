@@ -1,0 +1,8 @@
+cd ~/Documents/Barter\ system/api
+
+echo "=== Users ==="
+docker compose exec postgres psql -U postgres -d barter -c 'SELECT email, role, tier FROM "User" ORDER BY email;'
+
+echo ""
+echo "=== Products ==="
+docker compose exec postgres psql -U postgres -d barter -c 'SELECT title, "ownerId" FROM "Product";'

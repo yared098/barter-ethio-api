@@ -21,9 +21,8 @@ model User {
   role         Role     @default(USER)
   isActive     Boolean  @default(true)
 
-  // ─── Tier / monetization ───
-  tier         Tier     @default(FREE)
-  proExpiresAt DateTime?          // null = free forever; date = pro until then
+  tier         Tier      @default(FREE)
+  proExpiresAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -33,8 +32,8 @@ model User {
   sentOffers     BarterOffer[] @relation("sender")
   receivedOffers BarterOffer[] @relation("receiver")
   subscriptions  Subscription[]
-  deviceTokens  DeviceToken[]
-  sentMessages  Message[]
+  deviceTokens   DeviceToken[]
+  sentMessages   Message[]
 }
 
 model RefreshToken {
@@ -96,7 +95,6 @@ model Product {
   owner    User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id])
 
-  // What this product wants in exchange (many)
   wants ProductWanted[]
 
   offersAsOffered   BarterOffer[] @relation("offered")
@@ -106,13 +104,12 @@ model Product {
   @@index([categoryId, status])
 }
 
-// One product can want many categories
 model ProductWanted {
   id         String   @id @default(cuid())
   productId  String
   categoryId String
-  keywords   String?  // free text hint: "Samsung S24 Ultra", "Nike size 42"
-  minValue   Float?   // optional value range
+  keywords   String?
+  minValue   Float?
   maxValue   Float?
   createdAt  DateTime @default(now())
 
@@ -142,11 +139,36 @@ model BarterOffer {
   receiver         User    @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
   offeredProduct   Product @relation("offered", fields: [offeredProductId], references: [id])
   requestedProduct Product @relation("requested", fields: [requestedProductId], references: [id])
-  messages Message[]
-
+  messages         Message[]
 
   @@index([senderId, status])
   @@index([receiverId, status])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  offerId   String
+  senderId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  offer  BarterOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  sender User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([offerId, createdAt])
+}
+
+model DeviceToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  platform   String
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // ─────────────────────────────────────────────
@@ -182,30 +204,4 @@ enum OfferStatus {
   DECLINED
   COMPLETED
   CANCELLED
-} 
-
-model Message {
-  id        String   @id @default(cuid())
-  offerId   String
-  senderId  String
-  content   String
-  createdAt DateTime @default(now())
-
-  offer  BarterOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
-  sender User        @relation(fields: [senderId], references: [id], onDelete: Cascade)
-
-  @@index([offerId, createdAt])
-}
-
-model DeviceToken {
-  id         String   @id @default(cuid())
-  userId     String
-  token      String   @unique
-  platform   String   // "ios" | "android" | "web"
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
 }
