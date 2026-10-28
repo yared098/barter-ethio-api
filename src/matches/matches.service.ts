@@ -362,27 +362,66 @@ export class MatchesService {
     }
   }
 
-  private async formatResponse(
+   private async formatResponse(
     allMatches: MatchResult[],
     tier: 'FREE' | 'PRO',
     _total: number,
   ) {
     const limits = tierLimits(tier);
-    const visible =
-      tier === 'PRO'
-        ? allMatches
-        : allMatches.slice(0, limits.matchVisibleCount as number);
+
+    // ═══════════════════════════════════════════════
+    //  PRO — full access, no teasers, no upgrade prompt
+    // ═══════════════════════════════════════════════
+    if (tier === 'PRO') {
+      return {
+        matches: allMatches,
+        teaserMatches: [] as any[],
+        totalCount: allMatches.length,
+        hiddenCount: 0,
+        visibleLimit: null,
+        tier,
+        aiRanked: this.ai.isReady,
+        upgradeUrl: null,
+      };
+    }
+
+    // ═══════════════════════════════════════════════
+    //  FREE — 3 full matches + up to 5 blurred teasers
+    // ═══════════════════════════════════════════════
+    const visibleCount = limits.matchVisibleCount as number;
+    const teaserCount = limits.matchTeaserCount as number;
+
+    const visible = allMatches.slice(0, visibleCount);
+    const hidden = allMatches.slice(visibleCount);
+    const teaserSource = hidden.slice(0, teaserCount);
+
+    // Strip sensitive info — no title, no owner name, no description
+    const teaserMatches = teaserSource.map((m) => ({
+      id: m.product.id,
+      // Only the first image, for a blurred preview
+      image: (m.product.images as string[])?.[0] ?? null,
+      // Rounded score (doesn't expose exact ranking)
+      score: Math.round(m.score / 5) * 5,
+      // Category is safe — helps user gauge what they're missing
+      categoryName: m.product.category?.name ?? null,
+      categoryIcon: m.product.category?.icon ?? null,
+      // Approximate value (rounded to nearest 50)
+      estimatedValue: m.product.estimatedValue
+        ? Math.round(m.product.estimatedValue / 50) * 50
+        : null,
+      // Marker so client knows this is a locked teaser
+      locked: true,
+    }));
 
     return {
       matches: visible,
+      teaserMatches,
       totalCount: allMatches.length,
-      hiddenCount: allMatches.length - visible.length,
+      hiddenCount: hidden.length,
+      visibleLimit: visibleCount,
       tier,
-      aiRanked: this.ai.isReady,       // ← NEW: tells clients if AI ran
-      upgradeUrl:
-        tier === 'FREE' && allMatches.length > visible.length
-          ? '/billing/upgrade'
-          : null,
+      aiRanked: this.ai.isReady,
+      upgradeUrl: '/billing/upgrade',
     };
   }
 }

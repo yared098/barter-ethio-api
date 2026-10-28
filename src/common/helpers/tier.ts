@@ -20,11 +20,13 @@ export async function getEffectiveTier(
 export const TIER_LIMITS = {
   FREE: {
     maxActiveProducts: 1,
-    matchVisibleCount: 10,
+    matchVisibleCount: 3,        // ← 3 full matches for FREE
+    matchTeaserCount: 5,          // ← 5 blurred teasers below
   },
   PRO: {
     maxActiveProducts: Number.POSITIVE_INFINITY,
     matchVisibleCount: Number.POSITIVE_INFINITY,
+    matchTeaserCount: 0,
   },
 } as const;
 

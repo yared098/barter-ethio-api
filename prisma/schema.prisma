@@ -12,14 +12,14 @@ datasource db {
 // ─────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String  @id @default(cuid())
+  email        String  @unique
   name         String?
   image        String?
   passwordHash String?
-  googleId     String?  @unique
-  role         Role     @default(USER)
-  isActive     Boolean  @default(true)
+  googleId     String? @unique
+  role         Role    @default(USER)
+  isActive     Boolean @default(true)
 
   tier         Tier      @default(FREE)
   proExpiresAt DateTime?
@@ -29,11 +29,19 @@ model User {
 
   refreshTokens  RefreshToken[]
   products       Product[]
-  sentOffers     BarterOffer[] @relation("sender")
-  receivedOffers BarterOffer[] @relation("receiver")
+  sentOffers     BarterOffer[]  @relation("sender")
+  receivedOffers BarterOffer[]  @relation("receiver")
   subscriptions  Subscription[]
   deviceTokens   DeviceToken[]
   sentMessages   Message[]
+
+  // ── NEW: bidding ──
+  ownedListings BidListing[]
+  bidsPlaced    Bid[]        @relation("BidsPlaced")
+
+  // ── NEW: demand board ──
+  requests       Request[]
+  requestReplies RequestResponse[]
 }
 
 model RefreshToken {
@@ -75,6 +83,10 @@ model Category {
   icon     String?
   products Product[]
   wanted   ProductWanted[]
+
+  requestReplies RequestResponse[]
+
+  Request Request[]
 }
 
 model Product {
@@ -99,6 +111,11 @@ model Product {
 
   offersAsOffered   BarterOffer[] @relation("offered")
   offersAsRequested BarterOffer[] @relation("requested")
+
+  bidListing        BidListing?
+  bidOffersReceived Bid[]       @relation("BidOfferedProduct")
+
+  requestReplies RequestResponse[]
 
   @@index([ownerId, status])
   @@index([categoryId, status])
@@ -135,10 +152,10 @@ model BarterOffer {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  sender           User    @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver         User    @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
-  offeredProduct   Product @relation("offered", fields: [offeredProductId], references: [id])
-  requestedProduct Product @relation("requested", fields: [requestedProductId], references: [id])
+  sender           User      @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver         User      @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  offeredProduct   Product   @relation("offered", fields: [offeredProductId], references: [id])
+  requestedProduct Product   @relation("requested", fields: [requestedProductId], references: [id])
   messages         Message[]
 
   @@index([senderId, status])
@@ -204,4 +221,148 @@ enum OfferStatus {
   DECLINED
   COMPLETED
   CANCELLED
+}
+
+// ─────────────────────────────────────────────
+// BIDDING / AUCTION
+// ─────────────────────────────────────────────
+
+model BidListing {
+  id            String        @id @default(cuid())
+  productId     String        @unique
+  ownerId       String
+  type          BidType       @default(CASH) // CASH | BARTER | EITHER
+  startingBid   Float?
+  minIncrement  Float         @default(0)
+  buyNowPrice   Float?
+  reservePrice  Float?
+  endsAt        DateTime
+  status        ListingStatus @default(ACTIVE)
+  acceptedBidId String?       @unique
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  owner       User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  acceptedBid Bid?    @relation("AcceptedBid", fields: [acceptedBidId], references: [id])
+  bids        Bid[]
+
+  @@index([status, endsAt])
+  @@index([ownerId, status])
+}
+
+model Bid {
+  id               String    @id @default(cuid())
+  listingId        String
+  bidderId         String
+  amount           Float? // cash amount (CASH / EITHER)
+  offeredProductId String? // barter item (BARTER / EITHER)
+  message          String?
+  status           BidStatus @default(ACTIVE)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  listing        BidListing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bidder         User        @relation("BidsPlaced", fields: [bidderId], references: [id], onDelete: Cascade)
+  offeredProduct Product?    @relation("BidOfferedProduct", fields: [offeredProductId], references: [id])
+  acceptedFor    BidListing? @relation("AcceptedBid")
+
+  @@index([listingId, status, createdAt])
+  @@index([bidderId, status])
+}
+
+enum BidType {
+  CASH
+  BARTER
+  EITHER
+}
+
+enum ListingStatus {
+  ACTIVE
+  ACCEPTED
+  EXPIRED
+  CANCELLED
+}
+
+enum BidStatus {
+  ACTIVE
+  OUTBID
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+model Request {
+  id             String   @id @default(cuid())
+  authorId       String
+  title          String
+  description    String
+  images         String[]
+  specifications Json?
+  budgetMin      Float?
+  budgetMax      Float?
+
+  type   RequestType   @default(BUY)
+  status RequestStatus @default(OPEN)
+
+  location  String?
+  latitude  Float?
+  longitude Float?
+
+  categoryId String
+  expiresAt  DateTime?
+  closedAt   DateTime? // ← ADD THIS LINE
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author    User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  category  Category          @relation(fields: [categoryId], references: [id])
+  responses RequestResponse[]
+
+  @@index([status, createdAt])
+  @@index([authorId, status])
+  @@index([categoryId, status])
+}
+
+model RequestResponse {
+  id           String         @id @default(cuid())
+  requestId    String
+  responderId  String
+  productId    String? // offered product (if they have the item)
+  message      String
+  offeredPrice Float?
+  status       ResponseStatus @default(PENDING)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  request    Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  responder  User      @relation(fields: [responderId], references: [id], onDelete: Cascade)
+  product    Product?  @relation(fields: [productId], references: [id])
+  Category   Category? @relation(fields: [categoryId], references: [id])
+  categoryId String?
+
+  @@index([requestId, status])
+  @@index([responderId])
+}
+
+enum RequestType {
+  BUY
+  BARTER
+  EITHER
+}
+
+enum RequestStatus {
+  OPEN
+  CLOSED
+  FULFILLED
+  EXPIRED
+  CANCELLED
+}
+
+enum ResponseStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
 }

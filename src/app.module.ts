@@ -18,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { envValidationSchema } from './config/env.validation';
 import { RedisModule } from './redis/redis.module';
 import { AnalysisModule } from './analysis/analysis.module';
+import { RequestsModule } from './requests/requests.module';
 
 @Module({
   imports: [
@@ -46,7 +47,9 @@ import { AnalysisModule } from './analysis/analysis.module';
     MatchesModule,
     OffersModule,
     UploadsModule,
-    AnalysisModule
+    AnalysisModule,
+    RequestsModule,
+    RequestsModule
   ],
   providers: [
     // ─── Guard order matters (top → bottom) ───

@@ -41,4 +41,12 @@ export class AuthController {
   me(@CurrentUser('id') userId: string) {
     return this.auth.me(userId);
   }
+
+  @Public()
+@Post('google-code')
+async googleCodeLogin(
+  @Body() dto: { code: string; redirectUri: string },
+) {
+  return this.auth.googleCodeLogin(dto.code, dto.redirectUri);
+}
 }

@@ -45,6 +45,10 @@ export class AuthService {
     const tokens = await this.tokens.issue(user.id, user.role);
     return { user: this.sanitize(user), ...tokens };
   }
+ async googleCodeLogin(code: string, redirectUri: string) {
+  const { idToken } = await this.google.exchangeCode(code, redirectUri);
+  return this.googleLogin(idToken);
+}
 
   async passwordLogin(email: string, password: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
@@ -78,4 +82,5 @@ export class AuthService {
     const { passwordHash: _omit, ...safe } = user;
     return safe;
   }
+
 }
