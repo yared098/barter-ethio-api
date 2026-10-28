@@ -86,7 +86,7 @@ model Category {
 
   requestReplies RequestResponse[]
 
-  Request Request[]
+  requests Request[]
 }
 
 model Product {
@@ -145,8 +145,10 @@ model BarterOffer {
   id                 String      @id @default(cuid())
   senderId           String
   receiverId         String
-  offeredProductId   String
-  requestedProductId String
+  offeredProductId   String?
+  requestedProductId String? // ← CHANGE 1: was String, now String?
+  sourceType         String      @default("BARTER") // ← ADD
+  sourceId           String? // ← ADD
   status             OfferStatus @default(PENDING)
   message            String?
   createdAt          DateTime    @default(now())
@@ -154,12 +156,13 @@ model BarterOffer {
 
   sender           User      @relation("sender", fields: [senderId], references: [id], onDelete: Cascade)
   receiver         User      @relation("receiver", fields: [receiverId], references: [id], onDelete: Cascade)
-  offeredProduct   Product   @relation("offered", fields: [offeredProductId], references: [id])
-  requestedProduct Product   @relation("requested", fields: [requestedProductId], references: [id])
+  offeredProduct   Product?  @relation("offered", fields: [offeredProductId], references: [id])
+  requestedProduct Product?  @relation("requested", fields: [requestedProductId], references: [id])
   messages         Message[]
 
   @@index([senderId, status])
   @@index([receiverId, status])
+  @@index([sourceType, sourceId]) // ← ADD
 }
 
 model Message {
@@ -329,7 +332,7 @@ model RequestResponse {
   id           String         @id @default(cuid())
   requestId    String
   responderId  String
-  productId    String? // offered product (if they have the item)
+  productId    String?
   message      String
   offeredPrice Float?
   status       ResponseStatus @default(PENDING)
@@ -339,6 +342,7 @@ model RequestResponse {
   request    Request   @relation(fields: [requestId], references: [id], onDelete: Cascade)
   responder  User      @relation(fields: [responderId], references: [id], onDelete: Cascade)
   product    Product?  @relation(fields: [productId], references: [id])
+  // ← DELETED: Category and categoryId
   Category   Category? @relation(fields: [categoryId], references: [id])
   categoryId String?
 

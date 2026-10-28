@@ -106,90 +106,168 @@ export class OffersService {
     return offer;
   }
 
-  async accept(offerId: string, receiverId: string) {
-    const offer = await this.prisma.barterOffer.findUnique({ where: { id: offerId }, include: INCLUDE });
-    if (!offer) throw new NotFoundException('Offer not found');
-    if (offer.receiverId !== receiverId) throw new ForbiddenException('Only the receiver can accept');
-    if (offer.status !== 'PENDING') throw new ForbiddenException(`Cannot accept offer in status ${offer.status}`);
+ async accept(offerId: string, receiverId: string) {
+  const offer = await this.prisma.barterOffer.findUnique({
+    where: { id: offerId },
+    include: INCLUDE,
+  });
+  if (!offer) throw new NotFoundException('Offer not found');
+  if (offer.receiverId !== receiverId) {
+    throw new ForbiddenException('Only the receiver can accept');
+  }
+  if (offer.status !== 'PENDING') {
+    throw new ForbiddenException(`Cannot accept offer in status ${offer.status}`);
+  }
 
-    const receiver = await this.prisma.user.findUnique({ where: { id: receiverId }, select: { name: true } });
+  const receiver = await this.prisma.user.findUnique({
+    where: { id: receiverId },
+    select: { name: true },
+  });
 
-    await this.prisma.$transaction([
-      this.prisma.barterOffer.update({
-        where: { id: offerId },
-        data: { status: 'ACCEPTED' },
-      }),
-      this.prisma.product.update({
-        where: { id: offer.offeredProductId },
-        data: { ownerId: offer.receiverId, status: 'SWAPPED' },
-      }),
+  const ops: any[] = [
+    this.prisma.barterOffer.update({
+      where: { id: offerId },
+      data: { status: 'ACCEPTED' },
+    }),
+  ];
+
+  // Requested product (author's) — optional, null in request chats
+  if (offer.requestedProductId) {
+    ops.push(
       this.prisma.product.update({
         where: { id: offer.requestedProductId },
         data: { ownerId: offer.senderId, status: 'SWAPPED' },
       }),
-    ]);
-
-    // 🔔 Notify sender
-    await this.notifications.offerAccepted(
-      offer.senderId,
-      receiver?.name ?? 'Someone',
-      offer.id,
     );
-
-    return { ok: true, status: 'ACCEPTED' };
   }
 
-  async decline(offerId: string, receiverId: string) {
-    const offer = await this.prisma.barterOffer.findUnique({ where: { id: offerId }, include: INCLUDE });
-    if (!offer) throw new NotFoundException('Offer not found');
-    if (offer.receiverId !== receiverId) throw new ForbiddenException('Only the receiver can decline');
-    if (offer.status !== 'PENDING') throw new ForbiddenException(`Cannot decline in status ${offer.status}`);
-
-    const receiver = await this.prisma.user.findUnique({ where: { id: receiverId }, select: { name: true } });
-
-    await this.prisma.$transaction([
-      this.prisma.barterOffer.update({
-        where: { id: offerId },
-        data: { status: 'DECLINED' },
+  // Offered product (responder's) — optional, null in cash bids
+  if (offer.offeredProductId) {
+    ops.push(
+      this.prisma.product.update({
+        where: { id: offer.offeredProductId },
+        data: { ownerId: offer.receiverId, status: 'SWAPPED' },
       }),
-      this.prisma.product.update({ where: { id: offer.offeredProductId }, data: { status: 'AVAILABLE' } }),
-      this.prisma.product.update({ where: { id: offer.requestedProductId }, data: { status: 'AVAILABLE' } }),
-    ]);
-
-    await this.notifications.offerDeclined(
-      offer.senderId,
-      receiver?.name ?? 'Someone',
-      offer.id,
     );
-
-    return { ok: true, status: 'DECLINED' };
   }
 
-  async cancel(offerId: string, senderId: string) {
-    const offer = await this.prisma.barterOffer.findUnique({ where: { id: offerId }, include: INCLUDE });
-    if (!offer) throw new NotFoundException('Offer not found');
-    if (offer.senderId !== senderId) throw new ForbiddenException('Only the sender can cancel');
-    if (offer.status !== 'PENDING') throw new ForbiddenException(`Cannot cancel in status ${offer.status}`);
+  await this.prisma.$transaction(ops);
 
-    const sender = await this.prisma.user.findUnique({ where: { id: senderId }, select: { name: true } });
+  await this.notifications.offerAccepted(
+    offer.senderId,
+    receiver?.name ?? 'Someone',
+    offer.id,
+  );
 
-    await this.prisma.$transaction([
-      this.prisma.barterOffer.update({
-        where: { id: offerId },
-        data: { status: 'CANCELLED' },
+  return { ok: true, status: 'ACCEPTED' };
+}
+
+async decline(offerId: string, receiverId: string) {
+  const offer = await this.prisma.barterOffer.findUnique({
+    where: { id: offerId },
+    include: INCLUDE,
+  });
+  if (!offer) throw new NotFoundException('Offer not found');
+  if (offer.receiverId !== receiverId) {
+    throw new ForbiddenException('Only the receiver can decline');
+  }
+  if (offer.status !== 'PENDING') {
+    throw new ForbiddenException(`Cannot decline in status ${offer.status}`);
+  }
+
+  const receiver = await this.prisma.user.findUnique({
+    where: { id: receiverId },
+    select: { name: true },
+  });
+
+  const ops: any[] = [
+    this.prisma.barterOffer.update({
+      where: { id: offerId },
+      data: { status: 'DECLINED' },
+    }),
+  ];
+
+  if (offer.requestedProductId) {
+    ops.push(
+      this.prisma.product.update({
+        where: { id: offer.requestedProductId },
+        data: { status: 'AVAILABLE' },
       }),
-      this.prisma.product.update({ where: { id: offer.offeredProductId }, data: { status: 'AVAILABLE' } }),
-      this.prisma.product.update({ where: { id: offer.requestedProductId }, data: { status: 'AVAILABLE' } }),
-    ]);
-
-    await this.notifications.offerCancelled(
-      offer.receiverId,
-      sender?.name ?? 'Someone',
-      offer.id,
     );
-
-    return { ok: true, status: 'CANCELLED' };
   }
+
+  if (offer.offeredProductId) {
+    ops.push(
+      this.prisma.product.update({
+        where: { id: offer.offeredProductId },
+        data: { status: 'AVAILABLE' },
+      }),
+    );
+  }
+
+  await this.prisma.$transaction(ops);
+
+  await this.notifications.offerDeclined(
+    offer.senderId,
+    receiver?.name ?? 'Someone',
+    offer.id,
+  );
+
+  return { ok: true, status: 'DECLINED' };
+}
+ async cancel(offerId: string, senderId: string) {
+  const offer = await this.prisma.barterOffer.findUnique({
+    where: { id: offerId },
+    include: INCLUDE,
+  });
+  if (!offer) throw new NotFoundException('Offer not found');
+  if (offer.senderId !== senderId) {
+    throw new ForbiddenException('Only the sender can cancel');
+  }
+  if (offer.status !== 'PENDING') {
+    throw new ForbiddenException(`Cannot cancel in status ${offer.status}`);
+  }
+
+  const sender = await this.prisma.user.findUnique({
+    where: { id: senderId },
+    select: { name: true },
+  });
+
+  const ops: any[] = [
+    this.prisma.barterOffer.update({
+      where: { id: offerId },
+      data: { status: 'CANCELLED' },
+    }),
+  ];
+
+  if (offer.requestedProductId) {
+    ops.push(
+      this.prisma.product.update({
+        where: { id: offer.requestedProductId },
+        data: { status: 'AVAILABLE' },
+      }),
+    );
+  }
+
+  if (offer.offeredProductId) {
+    ops.push(
+      this.prisma.product.update({
+        where: { id: offer.offeredProductId },
+        data: { status: 'AVAILABLE' },
+      }),
+    );
+  }
+
+  await this.prisma.$transaction(ops);
+
+  await this.notifications.offerCancelled(
+    offer.receiverId,
+    sender?.name ?? 'Someone',
+    offer.id,
+  );
+
+  return { ok: true, status: 'CANCELLED' };
+}
 
   async complete(offerId: string, userId: string) {
     const offer = await this.prisma.barterOffer.findUnique({ where: { id: offerId }, include: INCLUDE });

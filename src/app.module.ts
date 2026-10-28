@@ -19,6 +19,7 @@ import { envValidationSchema } from './config/env.validation';
 import { RedisModule } from './redis/redis.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { RequestsModule } from './requests/requests.module';
+import { BiddingModule } from './bidding/bidding.module';
 
 @Module({
   imports: [
@@ -49,7 +50,8 @@ import { RequestsModule } from './requests/requests.module';
     UploadsModule,
     AnalysisModule,
     RequestsModule,
-    RequestsModule
+    RequestsModule,
+    BiddingModule
   ],
   providers: [
     // ─── Guard order matters (top → bottom) ───

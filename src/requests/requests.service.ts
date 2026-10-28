@@ -180,7 +180,7 @@ export class RequestsService {
   // ─────────────────────────────────────────────
   //  DETAIL
   // ─────────────────────────────────────────────
- async getDetail(id: string, viewerId?: string) {
+async getDetail(id: string, viewerId?: string) {
   const r = await this.prisma.request.findUnique({
     where: { id },
     include: {
@@ -196,7 +196,6 @@ export class RequestsService {
 
   const isAuthor = !!viewerId && r.authorId === viewerId;
 
-  // Author sees all responses. Non-author sees only their own.
   const responses = isAuthor
     ? r.responses
     : r.responses.filter((x) => x.responderId === viewerId);
@@ -206,13 +205,31 @@ export class RequestsService {
   const canAccept =
     isAuthor && r.status === 'OPEN' && r.responses.length > 0;
 
- 
+  // 🆕 Responder → find chat linked to their ACCEPTED reply
+  let myOfferId: string | null = null;
+  if (viewerId && !isAuthor) {
+    const myAcceptedReply = responses.find(
+      (x) => x.responderId === viewerId && x.status === 'ACCEPTED',
+    );
+    if (myAcceptedReply) {
+      const offer = await this.prisma.barterOffer.findFirst({
+        where: {
+          sourceType: 'REQUEST',
+          sourceId: myAcceptedReply.id,
+        },
+        select: { id: true },
+      });
+      myOfferId = offer?.id ?? null;
+    }
+  }
+
   return {
     ...r,
     responses,
     isAuthor,
     canRespond,
     canAccept,
+    myOfferId,                         // ← responder's chat
   };
 }
   // ─────────────────────────────────────────────
@@ -323,7 +340,8 @@ export class RequestsService {
     throw new NotFoundException('Reply not found');
   }
 
-  await this.prisma.$transaction(async (tx) => {
+  // ✅ Capture the return value — guaranteed `string`, not `string | null`
+  const offerId: string = await this.prisma.$transaction(async (tx) => {
     await tx.request.update({
       where: { id: requestId },
       data: { status: RequestStatus.CLOSED, closedAt: new Date() },
@@ -340,29 +358,33 @@ export class RequestsService {
       },
       data: { status: ResponseStatus.REJECTED },
     });
-  });
 
-  // Create a chat session (BarterOffer) so both sides can talk immediately
-  let offerId: string | null = null;
-  if (reply.productId) {
-    const offer = await this.prisma.barterOffer.create({
+    const offer = await tx.barterOffer.create({
       data: {
         senderId: reply.responderId,
         receiverId: authorId,
-        offeredProductId: reply.productId,
-        requestedProductId: reply.productId, // placeholder — swap for real ref if you have one
+        offeredProductId: reply.productId ?? null,
+        requestedProductId: null,
+        sourceType: 'REQUEST',
+        sourceId: replyId,
         message: reply.message,
         status: 'PENDING',
       },
     });
-    offerId = offer.id;
-  }
+
+    return offer.id;   // ← return the id directly
+  });
 
   this.notifications
     .sendToUser(reply.responderId, {
       title: '🎉 Your reply was accepted',
-      body: 'The requester picked you — open the chat to finalize.',
-      data: { type: 'request_reply_accepted', requestId, responseId: replyId },
+      body: 'Open the chat to finalize the deal.',
+      data: {
+        type: 'request_reply_accepted',
+        requestId,
+        responseId: replyId,
+        offerId,              // ← now safely `string`
+      },
     })
     .catch(() => {});
 
@@ -382,7 +404,7 @@ export class RequestsService {
   return {
     requestId,
     replyId,
-    offerId,         // ← frontend uses this to open the chat
+    offerId,                  // ← safely `string`
     status: 'CLOSED',
   };
 }
