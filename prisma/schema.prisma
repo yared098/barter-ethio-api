@@ -21,8 +21,19 @@ model User {
   role         Role    @default(USER)
   isActive     Boolean @default(true)
 
-  tier         Tier      @default(FREE)
-  proExpiresAt DateTime?
+  // ── Tier state ─────────────────────────────────────────
+  tier                 Tier      @default(FREE)
+  proExpiresAt         DateTime?          // when PRO ends
+  proBudgetRemaining   Int?                // posts left in PRO window (60 or 720)
+  dailyPassExpiresAt   DateTime?           // when daily pass ends (today midnight)
+  creditsRemaining     Int       @default(0)  // from credit packs
+
+  // ── Daily counter (resets at UTC midnight) ─────────────
+  postsTodayCount      Int       @default(0)
+  postsTodayDate       DateTime?            // date postsTodayCount is for
+
+  // ── Audit ──────────────────────────────────────────────
+  totalPostsMade       Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -34,14 +45,11 @@ model User {
   subscriptions  Subscription[]
   deviceTokens   DeviceToken[]
   sentMessages   Message[]
-
-  // ── NEW: bidding ──
-  ownedListings BidListing[]
-  bidsPlaced    Bid[]        @relation("BidsPlaced")
-
-  // ── NEW: demand board ──
+  ownedListings  BidListing[]
+  bidsPlaced     Bid[]          @relation("BidsPlaced")
   requests       Request[]
   requestReplies RequestResponse[]
+  payments       Payment[]                  // ← already there?
 }
 
 model RefreshToken {
@@ -202,6 +210,8 @@ enum Role {
 
 enum Tier {
   FREE
+  DAILY
+  CREDIT
   PRO
 }
 
@@ -369,4 +379,32 @@ enum ResponseStatus {
   ACCEPTED
   REJECTED
   WITHDRAWN
+}
+
+
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)  // ← ADD Cascade
+  txRef           String   @unique
+  amount          Float
+  currency        String   @default("ETB")
+  status          String   @default("pending")
+
+  plan            String                    // daily_pass | credit_100 | ... | monthly_pro | yearly_pro
+  grantsCredits   Int?                      // 100 / 500 / 1000
+  grantsProPosts  Int?                      // 60 / 720
+  grantsProDays   Int?                      // 30 / 365
+  grantsDailyPass Boolean  @default(false)  // true for daily_pass
+
+  provider        String   @default("chapa")
+  checkoutUrl     String?
+  rawResponse     Json?
+  paidAt          DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
 }

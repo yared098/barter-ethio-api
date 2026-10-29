@@ -20,7 +20,7 @@ import { RedisModule } from './redis/redis.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { RequestsModule } from './requests/requests.module';
 import { BiddingModule } from './bidding/bidding.module';
-
+import { PaymentsModule } from './payments/payments.module';
 @Module({
   imports: [
     // ─── Config with fail-fast env validation ───
@@ -51,7 +51,8 @@ import { BiddingModule } from './bidding/bidding.module';
     AnalysisModule,
     RequestsModule,
     RequestsModule,
-    BiddingModule
+    BiddingModule,
+    PaymentsModule
   ],
   providers: [
     // ─── Guard order matters (top → bottom) ───
