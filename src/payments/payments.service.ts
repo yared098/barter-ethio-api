@@ -112,7 +112,7 @@ export class PaymentsService {
       } else if (v?.status === 'failed') {
         await this.prisma.payment.update({
           where: { id: p.id },
-          data: { status: 'failed', rawResponse: v },
+          data: { status: 'failed', rawResponse: v as any },
         });
       } else if (p.expiresAt < new Date()) {
         await this.prisma.payment.update({
@@ -150,7 +150,7 @@ export class PaymentsService {
       } else if (v?.status === 'failed') {
         await this.prisma.payment.update({
           where: { id: p.id },
-          data: { status: 'failed', rawResponse: v },
+          data: { status: 'failed', rawResponse: v as any },
         });
       }
     }
@@ -234,7 +234,7 @@ export class PaymentsService {
   } else if (v.status === 'failed') {
     await this.prisma.payment.updateMany({
       where: { txRef, status: 'pending' },
-      data: { status: 'failed', rawResponse: v },
+      data: { status: 'failed', rawResponse: v as any },
     });
   }
   return { ok: true };
@@ -301,7 +301,7 @@ export class PaymentsService {
       this.log.warn(`markPaid: empty updates for ${txRef} — no grants set`);
       await this.prisma.payment.update({
         where: { txRef },
-        data: { status: 'paid', paidAt: now, rawResponse: verified },
+        data: { status: 'paid', paidAt: now, rawResponse: verified as any },
       });
       return;
     }
@@ -309,7 +309,7 @@ export class PaymentsService {
     await this.prisma.$transaction([
       this.prisma.payment.update({
         where: { txRef },
-        data: { status: 'paid', paidAt: now, rawResponse: verified },
+        data: { status: 'paid', paidAt: now, rawResponse: verified as any },
       }),
       this.prisma.user.update({
         where: { id: p.userId },

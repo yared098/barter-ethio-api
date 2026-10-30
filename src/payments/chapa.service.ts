@@ -22,14 +22,6 @@ interface ChapaVerifyRes {
   };
 }
 
-export interface ChapaVerifyResult {
-  verified: boolean;
-  amount: number | null;
-  currency: string | null;
-  status: string | null;
-  raw: any;
-}
-
 @Injectable()
 export class ChapaService {
   private readonly log = new Logger(ChapaService.name);
@@ -81,7 +73,9 @@ export class ChapaService {
         },
       );
 
-      this.log.log(`[initialize] Chapa response: ${JSON.stringify(data)}`);
+      this.log.log(
+        `[initialize] ${p.txRef} → wrapper=${data.status} url=${data.data?.checkout_url ?? 'none'}`,
+      );
 
       if (data.status !== 'success' || !data.data?.checkout_url) {
         throw new Error(data.message || 'Chapa init failed');
@@ -89,8 +83,7 @@ export class ChapaService {
       return { checkoutUrl: data.data.checkout_url };
     } catch (err: any) {
       this.log.error(
-        'Chapa initialize failed',
-        err?.response?.data ?? err.message,
+        `[initialize] ${p.txRef} FAILED: status=${err?.response?.status} message=${err?.response?.data?.message ?? err.message}`,
       );
       throw new Error(
         err?.response?.data?.message ?? 'Payment provider error',
@@ -99,31 +92,34 @@ export class ChapaService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // FIXED: the broken `this.http.get(...)` is now a real call
+  // VERIFY — with full diagnostic logging so we know WHY it fails
   // ─────────────────────────────────────────────────────────
-  async verify(txRef: string): Promise<ChapaVerifyResult | null> {
+  async verify(txRef: string): Promise<ChapaVerifyRes['data'] | null> {
     try {
       const { data } = await this.http.get<ChapaVerifyRes>(
         `/transaction/verify/${encodeURIComponent(txRef)}`,
       );
 
+      // 🔍 LOG EVERYTHING — this is what was missing before
       this.log.log(
-        `[verify] ${txRef} → wrapperStatus=${data.status} dataStatus=${data.data?.status} amount=${data.data?.amount}`,
+        `[verify] ${txRef} → HTTP=success` +
+          ` wrapperStatus=${data.status}` +
+          ` wrapperMessage="${data.message}"` +
+          ` dataStatus=${data.data?.status ?? 'none'}` +
+          ` amount=${data.data?.amount ?? 'none'}`,
       );
 
-      const success =
-        data.status === 'success' && data.data?.status === 'success';
+      if (data.status !== 'success') {
+        this.log.warn(
+          `[verify] ${txRef} — Chapa wrapper FAILED: ${data.message}`,
+        );
+        return null;
+      }
 
-      return {
-        verified: success,
-        amount: data.data?.amount ? Number(data.data.amount) : null,
-        currency: data.data?.currency ?? null,
-        status: (data.data?.status as string) ?? null,
-        raw: data,
-      };
+      return data.data ?? null;
     } catch (err: any) {
       this.log.warn(
-        `verify failed for ${txRef}: ${err?.response?.data?.message ?? err.message}`,
+        `[verify] ${txRef} — HTTP error: status=${err?.response?.status ?? 'no-response'} message=${err?.response?.data?.message ?? err.message}`,
       );
       return null;
     }
