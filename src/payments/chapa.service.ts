@@ -88,17 +88,32 @@ export class ChapaService {
     }
   }
 
-  async verify(txRef: string): Promise<ChapaVerifyRes['data'] | null> {
-    try {
-      const { data } = await this.http.get<ChapaVerifyRes>(
-        `/transaction/verify/${encodeURIComponent(txRef)}`,
-      );
-      return data.status === 'success' ? (data.data ?? null) : null;
-    } catch (err: any) {
-      this.log.warn(
-        `verify ${txRef} failed: ${err?.response?.data?.message ?? err.message}`,
-      );
-      return null;
-    }
+  async verify(txRef: string): Promise<{
+  verified: boolean;
+  amount: number | null;
+  currency: string | null;
+  status: string | null;
+  raw: any;
+} | null> {
+  try {
+    const { data } = await this.http.get(...);
+    
+    this.log.log(`[verify] ${txRef} → HTTP ${data.status} dataStatus=${data.data?.status}`);
+    
+    const success =
+      data.status === 'success' &&
+      data.data?.status === 'success';
+    
+    return {
+      verified: success,
+      amount: data.data?.amount ? Number(data.data.amount) : null,
+      currency: data.data?.currency ?? null,
+      status: data.data?.status ?? null,
+      raw: data,
+    };
+  } catch (err) {
+    this.log.warn(`verify failed for ${txRef}: ${err.message}`);
+    return null;
   }
+}
 }
