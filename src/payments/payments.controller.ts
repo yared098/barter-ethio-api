@@ -33,13 +33,10 @@ export class PaymentsController {
 
   // ✅ Chapa POST webhook — pass the signature header for verification
   @Public()
-  @Post('webhook')
-  webhookPost(
-    @Body() body: any,
-    @Headers('x-chapa-signature') signature: string,
-  ) {
-    return this.payments.handleWebhook(body, signature);
-  }
+@Post('webhook')
+webhookPost(@Body() body: any) {
+  return this.payments.handleWebhook(body);
+}
 
   // Chapa callback_url uses GET — no signature header, rely on chapa.verify()
   @Public()

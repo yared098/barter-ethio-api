@@ -159,17 +159,5 @@ export class ChapaService {
   }
 } 
 
-// Add this method inside ChapaService
-verifyWebhookSignature(rawBody: string, signature: string): boolean {
-  const secret = this.config.get<string>('CHAPA_WEBHOOK_SECRET');
-  if (!secret) {
-    this.log.warn('CHAPA_WEBHOOK_SECRET not set — skipping signature check');
-    return true; // or false, depending on your policy
-  }
-  const hash = crypto
-    .createHmac('sha256', secret)
-    .update(rawBody)
-    .digest('hex');
-  return hash === signature;
-}
+
 }

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiService } from '../analysis/ai.service';
-import { getEffectiveTier, tierLimits } from '../common/helpers/tier';
+import { getEffectiveTier, tierLimits ,Tier} from '../common/helpers/tier';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { RedisService } from 'src/redis/redis.service';
 
@@ -362,28 +362,31 @@ export class MatchesService {
     }
   }
 
-   private async formatResponse(
-    allMatches: MatchResult[],
-    tier: 'FREE' | 'PRO',
-    _total: number,
-  ) {
+  private async formatResponse(
+  allMatches: MatchResult[],
+  tier: Tier,                    // 'FREE' | 'DAILY' | 'CREDIT' | 'PRO'
+  _total: number,
+) {
     const limits = tierLimits(tier);
 
     // ═══════════════════════════════════════════════
     //  PRO — full access, no teasers, no upgrade prompt
     // ═══════════════════════════════════════════════
-    if (tier === 'PRO') {
-      return {
-        matches: allMatches,
-        teaserMatches: [] as any[],
-        totalCount: allMatches.length,
-        hiddenCount: 0,
-        visibleLimit: null,
-        tier,
-        aiRanked: this.ai.isReady,
-        upgradeUrl: null,
-      };
-    }
+    // ═══════════════════════════════════════════════
+//  ANY PAID TIER (DAILY / CREDIT / PRO) — full access
+// ═══════════════════════════════════════════════
+if (tier !== 'FREE') {
+  return {
+    matches: allMatches,
+    teaserMatches: [] as any[],
+    totalCount: allMatches.length,
+    hiddenCount: 0,
+    visibleLimit: null,
+    tier,
+    aiRanked: this.ai.isReady,
+    upgradeUrl: null,
+  };
+}
 
     // ═══════════════════════════════════════════════
     //  FREE — 3 full matches + up to 5 blurred teasers

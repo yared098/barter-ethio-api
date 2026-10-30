@@ -12,6 +12,7 @@ import { mkdir } from 'fs/promises';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
+    rawBody: true
   });
 
   const config = app.get(ConfigService);
