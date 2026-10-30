@@ -181,32 +181,32 @@ export class PaymentsService {
   // ─────────────────────────────────────────────────────────
   // WEBHOOK — called by Chapa (never trust the body)
   // ─────────────────────────────────────────────────────────
-  async handleWebhook(body: any) {
-    const txRef: string | undefined =
-      body?.tx_ref ?? body?.txRef ?? body?.reference;
+ async handleWebhook(body: any) {
+  const txRef: string | undefined =
+    body?.tx_ref ?? body?.trx_ref ?? body?.txRef ?? body?.reference;
 
-    if (!txRef) {
-      this.log.warn('Webhook missing tx_ref');
-      return { ok: false };
-    }
-
-    // Always verify against Chapa — never trust the webhook payload
-    const v = await this.chapa.verify(txRef);
-    if (!v) {
-      this.log.warn(`verify failed for webhook ${txRef}`);
-      return { ok: false };
-    }
-
-    if (v.status === 'success') {
-      await this.markPaid(txRef, v);
-    } else if (v.status === 'failed') {
-      await this.prisma.payment.updateMany({
-        where: { txRef, status: 'pending' },
-        data: { status: 'failed', rawResponse: v },
-      });
-    }
-    return { ok: true };
+  if (!txRef) {
+    this.log.warn('Webhook missing tx_ref');
+    return { ok: false };
   }
+
+  // Always verify against Chapa, never trust the payload
+  const v = await this.chapa.verify(txRef);
+  if (!v) {
+    this.log.warn(`verify failed for webhook ${txRef}`);
+    return { ok: false };
+  }
+
+  if (v.status === 'success') {
+    await this.markPaid(txRef, v);
+  } else if (v.status === 'failed') {
+    await this.prisma.payment.updateMany({
+      where: { txRef, status: 'pending' },
+      data: { status: 'failed', rawResponse: v },
+    });
+  }
+  return { ok: true };
+}
 
   // ─────────────────────────────────────────────────────────
   // MARK PAID — grant credits/plan (idempotent)
@@ -288,7 +288,7 @@ export class PaymentsService {
       currency: p.currency,
       description: p.description,
       tier: p.tier,
-      badgeKey: p.badgeKey ?? null,       // ← was `badge`
+      badgeKey: p.badgeKey ?? null,      
       highlighted: p.highlighted ?? false,
       dailyCap: p.dailyCap,
       periodLimit: p.periodLimit,

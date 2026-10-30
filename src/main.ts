@@ -10,7 +10,6 @@ import { join } from 'path';
 import { mkdir } from 'fs/promises';
 
 async function bootstrap() {
-  // bodyParser:false → we register our own with size limit
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
   });
@@ -20,8 +19,11 @@ async function bootstrap() {
   const isProd = config.get('NODE_ENV') === 'production';
   const port = Number(config.get('PORT')) || 3000;
 
-  // ─── Trust proxy (Railway/Render need this for real client IP) ───
-  if (config.get('TRUST_PROXY') === 'true') {
+  // ─── Trust proxy: REQUIRED when behind cPanel / Passenger / nginx / Render ───
+  // Without this, req.ip = proxy IP, req.protocol = 'http' → HTTPS redirect loop,
+  // rate limiting broken, session cookies mis-set.
+  const trustProxy = config.get('TRUST_PROXY') !== 'false'; // default ON
+  if (trustProxy) {
     app.set('trust proxy', 1);
     logger.log('✅ Trust proxy enabled');
   }
@@ -53,17 +55,28 @@ async function bootstrap() {
   app.useBodyParser('urlencoded', { limit: bodyLimit, extended: true });
   logger.log(`✅ Body size limit: ${bodyLimit}`);
 
-  // ─── HTTPS redirect (production only) ───
-  if (isProd) {
+  // ─── HTTPS redirect: ONLY if we're not behind a proxy that already terminates SSL ───
+  // cPanel / Passenger / Render all terminate TLS at the proxy and set
+  // x-forwarded-proto. Our redirect only matters if the proxy DOESN'T set it.
+  // Detected by: is the app binding to a Unix socket (Passenger)?
+  const isPassenger = !/^\d+$/.test(process.env.PORT ?? '');
+  const proxyTerminatesSsl =
+    isPassenger ||
+    !!process.env.RENDER ||
+    !!process.env.RAILWAY_ENVIRONMENT;
+
+  if (isProd && !proxyTerminatesSsl) {
     app.use((req: any, res: any, next: any) => {
-      const proto = req.header('x-forwarded-proto');
+      const proto = req.header('x-forwarded-proto') ?? req.protocol;
       const host = req.header('host') ?? '';
       if (proto !== 'https' && host && !host.includes('localhost')) {
         return res.redirect(301, `https://${host}${req.url}`);
       }
       next();
     });
-    logger.log('✅ HTTPS redirect enabled');
+    logger.log('✅ HTTPS redirect enabled (app-level)');
+  } else if (isProd) {
+    logger.log('⏭️  HTTPS redirect skipped (proxy handles SSL)');
   }
 
   // ─── CORS strict allowlist ───
@@ -117,14 +130,27 @@ async function bootstrap() {
   // ─── Graceful shutdown ───
   app.enableShutdownHooks();
 
-  await app.listen(port, '0.0.0.0');
+  // ─── Listen: Passenger (cPanel) uses a Unix socket, Render/VPS use TCP ───
+  // If PORT is numeric → TCP. If PORT is a path (e.g. /tmp/passenger.sock) → Unix socket.
+  const rawPort = process.env.PORT ?? String(port);
+  const listenTarget: number | string = /^\d+$/.test(rawPort)
+    ? Number(rawPort)
+    : rawPort;
+
+  await app.listen(listenTarget);
 
   // ─── Startup log ───
   if (process.env.RENDER || isProd) {
-    logger.log(`🚀 API running on port ${port}`);
+    const target =
+      typeof listenTarget === 'string'
+        ? `unix:${listenTarget}`
+        : `port ${listenTarget}`;
+    logger.log(`🚀 API running on ${target}`);
+    logger.log(`   Environment: ${config.get('NODE_ENV')}`);
     return;
   }
 
+  // Dev-only noise below
   const nets = os.networkInterfaces();
   const lanIps: string[] = [];
   for (const name of Object.keys(nets)) {
@@ -144,4 +170,7 @@ async function bootstrap() {
   logger.log(`   Environment: ${config.get('NODE_ENV') ?? 'development'}`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('❌ Fatal startup error:', err);
+  process.exit(1);
+});
