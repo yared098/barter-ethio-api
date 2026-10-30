@@ -22,6 +22,14 @@ interface ChapaVerifyRes {
   };
 }
 
+export interface ChapaVerifyResult {
+  verified: boolean;
+  amount: number | null;
+  currency: string | null;
+  status: string | null;
+  raw: any;
+}
+
 @Injectable()
 export class ChapaService {
   private readonly log = new Logger(ChapaService.name);
@@ -73,6 +81,8 @@ export class ChapaService {
         },
       );
 
+      this.log.log(`[initialize] Chapa response: ${JSON.stringify(data)}`);
+
       if (data.status !== 'success' || !data.data?.checkout_url) {
         throw new Error(data.message || 'Chapa init failed');
       }
@@ -88,32 +98,34 @@ export class ChapaService {
     }
   }
 
-  async verify(txRef: string): Promise<{
-  verified: boolean;
-  amount: number | null;
-  currency: string | null;
-  status: string | null;
-  raw: any;
-} | null> {
-  try {
-    const { data } = await this.http.get(...);
-    
-    this.log.log(`[verify] ${txRef} → HTTP ${data.status} dataStatus=${data.data?.status}`);
-    
-    const success =
-      data.status === 'success' &&
-      data.data?.status === 'success';
-    
-    return {
-      verified: success,
-      amount: data.data?.amount ? Number(data.data.amount) : null,
-      currency: data.data?.currency ?? null,
-      status: data.data?.status ?? null,
-      raw: data,
-    };
-  } catch (err) {
-    this.log.warn(`verify failed for ${txRef}: ${err.message}`);
-    return null;
+  // ─────────────────────────────────────────────────────────
+  // FIXED: the broken `this.http.get(...)` is now a real call
+  // ─────────────────────────────────────────────────────────
+  async verify(txRef: string): Promise<ChapaVerifyResult | null> {
+    try {
+      const { data } = await this.http.get<ChapaVerifyRes>(
+        `/transaction/verify/${encodeURIComponent(txRef)}`,
+      );
+
+      this.log.log(
+        `[verify] ${txRef} → wrapperStatus=${data.status} dataStatus=${data.data?.status} amount=${data.data?.amount}`,
+      );
+
+      const success =
+        data.status === 'success' && data.data?.status === 'success';
+
+      return {
+        verified: success,
+        amount: data.data?.amount ? Number(data.data.amount) : null,
+        currency: data.data?.currency ?? null,
+        status: (data.data?.status as string) ?? null,
+        raw: data,
+      };
+    } catch (err: any) {
+      this.log.warn(
+        `verify failed for ${txRef}: ${err?.response?.data?.message ?? err.message}`,
+      );
+      return null;
+    }
   }
-}
 }
