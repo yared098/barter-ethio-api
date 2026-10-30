@@ -184,51 +184,61 @@ export class PaymentsService {
   // WEBHOOK — FIX #2: check body.data.tx_ref + log everything
   // ─────────────────────────────────────────────────────────
   async handleWebhook(body: any) {
-    // Log raw payload so we can see EXACTLY what Chapa sends
-    this.log.log(`← Webhook received: ${JSON.stringify(body)}`);
+  // Log EVERYTHING so we can see the exact shape Chapa sends
+  this.log.log(`← Webhook received: ${JSON.stringify(body)}`);
 
-    // Chapa nests payload under `data` in newer versions
-    const payload = body?.data ?? body;
+  // Chapa uses `payload` (most common), sometimes `data`, sometimes top-level.
+  // Try all known shapes.
+  const candidates: any[] = [
+    body?.payload,
+    body?.data,
+    body?.event_data,
+    body?.transaction,
+    body,
+  ].filter(Boolean);
 
-    const txRef: string | undefined =
-      payload?.tx_ref ??
-      payload?.trx_ref ??
-      payload?.txRef ??
-      payload?.reference ??
-      body?.event_data?.tx_ref ??
-      body?.transaction?.tx_ref;
-
-    if (!txRef) {
-      this.log.warn(
-        `✗ Webhook missing tx_ref — body keys: ${Object.keys(body ?? {}).join(',')}` +
-          ` | data keys: ${Object.keys(body?.data ?? {}).join(',')}`,
-      );
-      return { ok: false };
-    }
-
-    this.log.log(`→ Webhook processing: ${txRef}`);
-
-    const v = await this.chapa.verify(txRef);
-    if (!v) {
-      this.log.warn(`✗ Chapa verify returned null for ${txRef}`);
-      return { ok: false };
-    }
-
-    this.log.log(
-      `✓ Chapa verify: ${txRef} status=${v.status} amount=${v.amount}`,
-    );
-
-    if (v.status === 'success') {
-      await this.markPaid(txRef, v);
-    } else if (v.status === 'failed') {
-      await this.prisma.payment.updateMany({
-        where: { txRef, status: 'pending' },
-        data: { status: 'failed', rawResponse: v },
-      });
-    }
-    return { ok: true };
+  let txRef: string | undefined;
+  for (const c of candidates) {
+    txRef =
+      c?.tx_ref ??
+      c?.trx_ref ??
+      c?.txRef ??
+      (typeof c?.reference === 'string' && c.reference.startsWith('BARTER-')
+        ? c.reference
+        : undefined);
+    if (txRef) break;
   }
 
+  if (!txRef) {
+    this.log.warn(
+      `✗ Webhook missing tx_ref.` +
+        ` Top-level keys: [${Object.keys(body ?? {}).join(',')}]` +
+        ` | payload keys: [${Object.keys(body?.payload ?? {}).join(',')}]` +
+        ` | data keys: [${Object.keys(body?.data ?? {}).join(',')}]`,
+    );
+    return { ok: false };
+  }
+
+  this.log.log(`→ Webhook processing: ${txRef}`);
+
+  const v = await this.chapa.verify(txRef);
+  if (!v) {
+    this.log.warn(`✗ Chapa verify returned null for ${txRef}`);
+    return { ok: false };
+  }
+
+  this.log.log(`✓ Chapa verify: ${txRef} status=${v.status} amount=${v.amount}`);
+
+  if (v.status === 'success') {
+    await this.markPaid(txRef, v);
+  } else if (v.status === 'failed') {
+    await this.prisma.payment.updateMany({
+      where: { txRef, status: 'pending' },
+      data: { status: 'failed', rawResponse: v },
+    });
+  }
+  return { ok: true };
+}
   // ─────────────────────────────────────────────────────────
   // MARK PAID — grant credits/plan (idempotent)
   // ─────────────────────────────────────────────────────────
