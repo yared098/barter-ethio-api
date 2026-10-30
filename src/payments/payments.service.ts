@@ -183,12 +183,21 @@ export class PaymentsService {
   // ─────────────────────────────────────────────────────────
   // WEBHOOK — FIX #2: check body.data.tx_ref + log everything
   // ─────────────────────────────────────────────────────────
-  async handleWebhook(body: any) {
-  // Log EVERYTHING so we can see the exact shape Chapa sends
+async handleWebhook(body: any, signature?: string) {
   this.log.log(`← Webhook received: ${JSON.stringify(body)}`);
 
-  // Chapa uses `payload` (most common), sometimes `data`, sometimes top-level.
-  // Try all known shapes.
+  // ✅ 1. Verify signature (if configured)
+  if (signature) {
+    const ok = this.chapa.verifyWebhookSignature(JSON.stringify(body), signature);
+    if (!ok) {
+      this.log.error('❌ Invalid webhook signature — rejecting');
+      return { ok: false };
+    }
+  } else {
+    this.log.warn('⚠️ No x-chapa-signature header — cannot verify origin');
+  }
+
+  // ... rest of your existing webhook logic (unchanged)
   const candidates: any[] = [
     body?.payload,
     body?.data,
@@ -210,12 +219,7 @@ export class PaymentsService {
   }
 
   if (!txRef) {
-    this.log.warn(
-      `✗ Webhook missing tx_ref.` +
-        ` Top-level keys: [${Object.keys(body ?? {}).join(',')}]` +
-        ` | payload keys: [${Object.keys(body?.payload ?? {}).join(',')}]` +
-        ` | data keys: [${Object.keys(body?.data ?? {}).join(',')}]`,
-    );
+    this.log.warn(`✗ Webhook missing tx_ref.`);
     return { ok: false };
   }
 
@@ -248,10 +252,21 @@ export class PaymentsService {
       this.log.warn(`markPaid: ${txRef} not found`);
       return;
     }
-    if (p.status === 'paid') {
-      this.log.log(`markPaid: ${txRef} already paid — skipping`);
-      return;
-    }
+    // if (p.status === 'paid') {
+    //   this.log.log(`markPaid: ${txRef} already paid — skipping`);
+    //   return;
+    // }  
+
+    // ✅ Atomic claim: only one request can transition pending → paid
+const claimed = await this.prisma.payment.updateMany({
+  where: { txRef, status: 'pending' },
+  data: { status: 'paid', paidAt: new Date() },
+});
+
+if (claimed.count === 0) {
+  this.log.log(`markPaid: ${txRef} already paid (or not pending) — skipping`);
+  return;
+}
 
     const paid = parseFloat(String(verified.amount ?? '0'));
     this.log.log(
