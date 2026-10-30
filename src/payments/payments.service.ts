@@ -46,11 +46,11 @@ export class PaymentsService {
         plan: dto.plan,
 
         // grants — derived from PLANS config
-        grantsCredits: plan.periodDays === null ? plan.periodLimit : null, // credit packs
+        grantsCredits: plan.periodDays === null ? plan.periodLimit : null,
         grantsProPosts:
           plan.periodDays !== null && plan.periodLimit !== plan.dailyCap
             ? plan.periodLimit
-            : null, // monthly_pro / yearly_pro
+            : null,
         grantsProDays:
           plan.periodDays !== null && plan.periodLimit !== plan.dailyCap
             ? plan.periodDays
@@ -63,6 +63,11 @@ export class PaymentsService {
       },
     });
 
+    // ── FIX #1: append ?tx_ref= to returnUrl so netlify page can find it
+    const deepLink = this.config.get('APP_DEEP_LINK')!;
+    const returnUrl = `${deepLink}${deepLink.includes('?') ? '&' : '?'}tx_ref=${encodeURIComponent(txRef)}`;
+    this.log.log(`[init] returnUrl = ${returnUrl}`);
+
     // ── call Chapa
     const { checkoutUrl } = await this.chapa.initialize({
       amount: plan.price,
@@ -72,7 +77,7 @@ export class PaymentsService {
       lastName: user.name?.split(' ').slice(1).join(' ') || 'Barter',
       txRef,
       callbackUrl: `${this.config.get('API_PUBLIC_URL')}/payments/webhook`,
-      returnUrl: this.config.get('APP_DEEP_LINK')!,
+      returnUrl,                      // ← now includes tx_ref
       title: 'Barter',
       description: plan.label ?? dto.plan,
     });
@@ -93,15 +98,13 @@ export class PaymentsService {
     };
   }
 
-    // ─────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────
   // PUBLIC STATUS BY TXREF — used by the netlify success page
-  //   Only reveals safe fields (no userId, no rawResponse)
   // ─────────────────────────────────────────────────────────
   async getByTxRef(txRef: string) {
     let p = await this.prisma.payment.findUnique({ where: { txRef } });
     if (!p) throw new NotFoundException('Payment not found');
 
-    // If still pending, ask Chapa directly (webhook may be delayed)
     if (p.status === 'pending') {
       const v = await this.chapa.verify(txRef);
       if (v?.status === 'success') {
@@ -122,7 +125,7 @@ export class PaymentsService {
 
     return {
       txRef: p!.txRef,
-      status: p!.status,          // pending | paid | failed | expired
+      status: p!.status,
       amount: p!.amount,
       currency: p!.currency,
       plan: p!.plan,
@@ -130,6 +133,7 @@ export class PaymentsService {
       expiresAt: p!.expiresAt,
     };
   }
+
   // ─────────────────────────────────────────────────────────
   // STATUS — polled by the app every 3s
   // ─────────────────────────────────────────────────────────
@@ -139,7 +143,6 @@ export class PaymentsService {
     });
     if (!p || p.userId !== userId) throw new NotFoundException('Not found');
 
-    // Still pending? Verify against Chapa directly (fallback if webhook delayed)
     if (p.status === 'pending') {
       const v = await this.chapa.verify(p.txRef);
       if (v?.status === 'success') {
@@ -152,7 +155,6 @@ export class PaymentsService {
       }
     }
 
-    // Auto-expire if TTL passed
     const fresh = await this.prisma.payment.findUnique({
       where: { id: paymentId },
     });
@@ -179,64 +181,95 @@ export class PaymentsService {
   }
 
   // ─────────────────────────────────────────────────────────
-  // WEBHOOK — called by Chapa (never trust the body)
+  // WEBHOOK — FIX #2: check body.data.tx_ref + log everything
   // ─────────────────────────────────────────────────────────
- async handleWebhook(body: any) {
-  const txRef: string | undefined =
-    body?.tx_ref ?? body?.trx_ref ?? body?.txRef ?? body?.reference;
+  async handleWebhook(body: any) {
+    // Log raw payload so we can see EXACTLY what Chapa sends
+    this.log.log(`← Webhook received: ${JSON.stringify(body)}`);
 
-  if (!txRef) {
-    this.log.warn('Webhook missing tx_ref');
-    return { ok: false };
-  }
+    // Chapa nests payload under `data` in newer versions
+    const payload = body?.data ?? body;
 
-  // Always verify against Chapa, never trust the payload
-  const v = await this.chapa.verify(txRef);
-  if (!v) {
-    this.log.warn(`verify failed for webhook ${txRef}`);
-    return { ok: false };
-  }
+    const txRef: string | undefined =
+      payload?.tx_ref ??
+      payload?.trx_ref ??
+      payload?.txRef ??
+      payload?.reference ??
+      body?.event_data?.tx_ref ??
+      body?.transaction?.tx_ref;
 
-  if (v.status === 'success') {
-    await this.markPaid(txRef, v);
-  } else if (v.status === 'failed') {
-    await this.prisma.payment.updateMany({
-      where: { txRef, status: 'pending' },
-      data: { status: 'failed', rawResponse: v },
-    });
+    if (!txRef) {
+      this.log.warn(
+        `✗ Webhook missing tx_ref — body keys: ${Object.keys(body ?? {}).join(',')}` +
+          ` | data keys: ${Object.keys(body?.data ?? {}).join(',')}`,
+      );
+      return { ok: false };
+    }
+
+    this.log.log(`→ Webhook processing: ${txRef}`);
+
+    const v = await this.chapa.verify(txRef);
+    if (!v) {
+      this.log.warn(`✗ Chapa verify returned null for ${txRef}`);
+      return { ok: false };
+    }
+
+    this.log.log(
+      `✓ Chapa verify: ${txRef} status=${v.status} amount=${v.amount}`,
+    );
+
+    if (v.status === 'success') {
+      await this.markPaid(txRef, v);
+    } else if (v.status === 'failed') {
+      await this.prisma.payment.updateMany({
+        where: { txRef, status: 'pending' },
+        data: { status: 'failed', rawResponse: v },
+      });
+    }
+    return { ok: true };
   }
-  return { ok: true };
-}
 
   // ─────────────────────────────────────────────────────────
   // MARK PAID — grant credits/plan (idempotent)
   // ─────────────────────────────────────────────────────────
   private async markPaid(txRef: string, verified: any) {
     const p = await this.prisma.payment.findUnique({ where: { txRef } });
-    if (!p || p.status === 'paid') return; // idempotent
+    if (!p) {
+      this.log.warn(`markPaid: ${txRef} not found`);
+      return;
+    }
+    if (p.status === 'paid') {
+      this.log.log(`markPaid: ${txRef} already paid — skipping`);
+      return;
+    }
 
-    const paid = parseFloat(verified.amount ?? '0');
+    const paid = parseFloat(String(verified.amount ?? '0'));
+    this.log.log(
+      `markPaid ${txRef}: paid=${paid} expected=${p.amount} ` +
+        `grants={credits:${p.grantsCredits}, proPosts:${p.grantsProPosts}, ` +
+        `proDays:${p.grantsProDays}, dailyPass:${p.grantsDailyPass}}`,
+    );
+
     if (paid < p.amount - 0.01) {
-      this.log.warn(
-        `amount mismatch ${txRef}: paid=${paid} expected=${p.amount}`,
-      );
+      this.log.warn(`markPaid: amount mismatch ${txRef} — SKIPPING`);
       return;
     }
 
     const user = await this.prisma.user.findUnique({
       where: { id: p.userId },
     });
-    if (!user) return;
+    if (!user) {
+      this.log.warn(`markPaid: user ${p.userId} not found`);
+      return;
+    }
 
     const now = new Date();
     const updates: any = {};
 
     if (p.grantsDailyPass) {
-      // Daily pass — 10/day until midnight UTC
       updates.dailyPassExpiresAt = endOfTodayUtc();
       if (user.tier === 'FREE') updates.tier = 'DAILY';
     } else if (p.grantsProPosts && p.grantsProDays) {
-      // Monthly / yearly PRO — stack budget + extend expiry
       const base =
         user.proExpiresAt && user.proExpiresAt > now
           ? user.proExpiresAt
@@ -249,11 +282,18 @@ export class PaymentsService {
         (user.proBudgetRemaining ?? 0) + p.grantsProPosts;
       updates.tier = 'PRO';
     } else if (p.grantsCredits) {
-      // Credit pack — never expires
       updates.creditsRemaining =
         (user.creditsRemaining ?? 0) + p.grantsCredits;
-      // don't downgrade an active PRO/DAILY
       if (user.tier === 'FREE') updates.tier = 'CREDIT';
+    }
+
+    if (Object.keys(updates).length === 0) {
+      this.log.warn(`markPaid: empty updates for ${txRef} — no grants set`);
+      await this.prisma.payment.update({
+        where: { txRef },
+        data: { status: 'paid', paidAt: now, rawResponse: verified },
+      });
+      return;
     }
 
     await this.prisma.$transaction([
@@ -267,9 +307,10 @@ export class PaymentsService {
       }),
     ]);
 
-    this.log.log(`PAID ${txRef} plan=${p.plan} user=${p.userId}`);
+    this.log.log(
+      `✅ PAID ${txRef} plan=${p.plan} user=${p.userId} updates=${JSON.stringify(updates)}`,
+    );
 
-    // optional push
     try {
       await this.notifications.sendToUser(p.userId, {
         title: 'Payment confirmed 🎉',
@@ -288,7 +329,7 @@ export class PaymentsService {
       currency: p.currency,
       description: p.description,
       tier: p.tier,
-      badgeKey: p.badgeKey ?? null,      
+      badgeKey: p.badgeKey ?? null,
       highlighted: p.highlighted ?? false,
       dailyCap: p.dailyCap,
       periodLimit: p.periodLimit,
