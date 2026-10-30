@@ -95,33 +95,66 @@ export class ChapaService {
   // VERIFY — with full diagnostic logging so we know WHY it fails
   // ─────────────────────────────────────────────────────────
   async verify(txRef: string): Promise<ChapaVerifyRes['data'] | null> {
-    try {
-      const { data } = await this.http.get<ChapaVerifyRes>(
-        `/transaction/verify/${encodeURIComponent(txRef)}`,
-      );
+  try {
+    const { data } = await this.http.get<ChapaVerifyRes>(
+      `/transaction/verify/${encodeURIComponent(txRef)}`,
+    );
 
-      // 🔍 LOG EVERYTHING — this is what was missing before
-      this.log.log(
-        `[verify] ${txRef} → HTTP=success` +
-          ` wrapperStatus=${data.status}` +
-          ` wrapperMessage="${data.message}"` +
-          ` dataStatus=${data.data?.status ?? 'none'}` +
-          ` amount=${data.data?.amount ?? 'none'}`,
-      );
+    // ✅ Full diagnostic log
+    this.log.log(
+      `[verify] ${txRef} → HTTP=success` +
+        ` wrapperStatus=${data.status}` +
+        ` wrapperMessage="${data.message}"` +
+        ` dataStatus=${data.data?.status ?? 'none'}` +
+        ` amount=${data.data?.amount ?? 'none'}`,
+    );
 
-      if (data.status !== 'success') {
-        this.log.warn(
-          `[verify] ${txRef} — Chapa wrapper FAILED: ${data.message}`,
-        );
-        return null;
-      }
-
-      return data.data ?? null;
-    } catch (err: any) {
-      this.log.warn(
-        `[verify] ${txRef} — HTTP error: status=${err?.response?.status ?? 'no-response'} message=${err?.response?.data?.message ?? err.message}`,
+    // ❌ Chapa wrapper itself failed (e.g. status: "failed")
+    if (data.status !== 'success') {
+      this.log.error(
+        `❌ UNABLE TO VERIFY ${txRef}: Chapa wrapper returned status="${data.status}" message="${data.message}"`,
       );
       return null;
     }
+
+    // ❌ Wrapper OK but no data payload
+    if (!data.data) {
+      this.log.error(
+        `❌ UNABLE TO VERIFY ${txRef}: Chapa returned success but data is empty`,
+      );
+      return null;
+    }
+
+    // ✅ Log the actual transaction status
+    this.log.log(
+      `✅ Verified ${txRef}: transaction status="${data.data.status}" amount=${data.data.amount} ${data.data.currency}`,
+    );
+
+    return data.data;
+  } catch (err: any) {
+    const status = err?.response?.status ?? 'no-response';
+    const chapaMessage =
+      err?.response?.data?.message ?? err?.message ?? 'unknown error';
+
+    // ❌ Distinguish between 404 (not found) and other errors
+    if (status === 404) {
+      this.log.error(
+        `❌ UNABLE TO VERIFY ${txRef}: 404 Not Found. ` +
+          `This tx_ref does not exist in Chapa. ` +
+          `Check that the payment was initialized with the SAME key mode (test vs live).`,
+      );
+    } else if (status === 401) {
+      this.log.error(
+        `❌ UNABLE TO VERIFY ${txRef}: 401 Unauthorized. ` +
+          `Your CHAPA_SECRET_KEY is invalid or does not match the environment.`,
+      );
+    } else {
+      this.log.error(
+        `❌ UNABLE TO VERIFY ${txRef}: HTTP ${status} — ${chapaMessage}`,
+      );
+    }
+
+    return null;
   }
+}
 }
