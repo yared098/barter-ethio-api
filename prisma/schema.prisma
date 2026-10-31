@@ -22,34 +22,34 @@ model User {
   isActive     Boolean @default(true)
 
   // ── Tier state ─────────────────────────────────────────
-  tier                 Tier      @default(FREE)
-  proExpiresAt         DateTime?          // when PRO ends
-  proBudgetRemaining   Int?                // posts left in PRO window (60 or 720)
-  dailyPassExpiresAt   DateTime?           // when daily pass ends (today midnight)
-  creditsRemaining     Int       @default(0)  // from credit packs
+  tier               Tier      @default(FREE)
+  proExpiresAt       DateTime? // when PRO ends
+  proBudgetRemaining Int? // posts left in PRO window (60 or 720)
+  dailyPassExpiresAt DateTime? // when daily pass ends (today midnight)
+  creditsRemaining   Int       @default(0) // from credit packs
 
   // ── Daily counter (resets at UTC midnight) ─────────────
-  postsTodayCount      Int       @default(0)
-  postsTodayDate       DateTime?            // date postsTodayCount is for
+  postsTodayCount Int       @default(0)
+  postsTodayDate  DateTime? // date postsTodayCount is for
 
   // ── Audit ──────────────────────────────────────────────
-  totalPostsMade       Int       @default(0)
+  totalPostsMade Int @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   refreshTokens  RefreshToken[]
   products       Product[]
-  sentOffers     BarterOffer[]  @relation("sender")
-  receivedOffers BarterOffer[]  @relation("receiver")
+  sentOffers     BarterOffer[]     @relation("sender")
+  receivedOffers BarterOffer[]     @relation("receiver")
   subscriptions  Subscription[]
   deviceTokens   DeviceToken[]
   sentMessages   Message[]
   ownedListings  BidListing[]
-  bidsPlaced     Bid[]          @relation("BidsPlaced")
+  bidsPlaced     Bid[]             @relation("BidsPlaced")
   requests       Request[]
   requestReplies RequestResponse[]
-  payments       Payment[]                  // ← already there?
+  payments       Payment[] // ← already there?
 }
 
 model RefreshToken {
@@ -318,9 +318,11 @@ model Request {
   type   RequestType   @default(BUY)
   status RequestStatus @default(OPEN)
 
-  location  String?
-  latitude  Float?
-  longitude Float?
+  location             String?
+  latitude             Float?
+  longitude            Float?
+  // ⭐ NEW — poster opts in to location-gated replies
+  isLocationRestricted Boolean @default(false)
 
   categoryId String
   expiresAt  DateTime?
@@ -336,6 +338,7 @@ model Request {
   @@index([status, createdAt])
   @@index([authorId, status])
   @@index([categoryId, status])
+  @@index([latitude, longitude]) // ⭐ NEW — fast geo queries
 }
 
 model RequestResponse {
@@ -381,29 +384,28 @@ enum ResponseStatus {
   WITHDRAWN
 }
 
-
 model Payment {
-  id              String   @id @default(cuid())
-  userId          String
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)  // ← ADD Cascade
-  txRef           String   @unique
-  amount          Float
-  currency        String   @default("ETB")
-  status          String   @default("pending")
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade) // ← ADD Cascade
+  txRef    String @unique
+  amount   Float
+  currency String @default("ETB")
+  status   String @default("pending")
 
-  plan            String                    // daily_pass | credit_100 | ... | monthly_pro | yearly_pro
-  grantsCredits   Int?                      // 100 / 500 / 1000
-  grantsProPosts  Int?                      // 60 / 720
-  grantsProDays   Int?                      // 30 / 365
-  grantsDailyPass Boolean  @default(false)  // true for daily_pass
+  plan            String // daily_pass | credit_100 | ... | monthly_pro | yearly_pro
+  grantsCredits   Int? // 100 / 500 / 1000
+  grantsProPosts  Int? // 60 / 720
+  grantsProDays   Int? // 30 / 365
+  grantsDailyPass Boolean @default(false) // true for daily_pass
 
-  provider        String   @default("chapa")
-  checkoutUrl     String?
-  rawResponse     Json?
-  paidAt          DateTime?
-  expiresAt       DateTime
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  provider    String    @default("chapa")
+  checkoutUrl String?
+  rawResponse Json?
+  paidAt      DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId])
   @@index([status])
