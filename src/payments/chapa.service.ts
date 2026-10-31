@@ -232,7 +232,7 @@ export class ChapaService {
     const body = {
       amount: p.amount.toFixed(2),
       currency: p.currency,
-      email: p.email,
+      email: p.email ??'yades.dev@gmail.com',
       first_name: p.firstName,
       last_name: p.lastName,
       phone_number: p.phoneNumber ?? '0900000000',
