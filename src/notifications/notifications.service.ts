@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseService } from '../firebase/firebase.service';
+import { TelegramNotifyService } from '../telegram/telegram-notify.service';
 
 export interface NotificationPayload {
   title: string;
@@ -15,9 +16,22 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly firebase: FirebaseService,
+    @Optional()
+    @Inject(TelegramNotifyService)
+    private readonly telegram?: TelegramNotifyService,
   ) {}
 
   async sendToUser(userId: string, payload: NotificationPayload): Promise<void> {
+    // ⭐ FIRE-AND-FORGET Telegram push — fires regardless of FCM tokens
+    void this.telegram
+      ?.sendToUser(userId, { title: payload.title, body: payload.body })
+      .catch((e) =>
+        this.logger.warn(
+          `[TELEGRAM-PUSH-FAIL] user=${userId}: ${(e as Error).message}`,
+        ),
+      );
+
+    // ── existing FCM flow ─────────────────────────────────────────
     const tokens = await this.prisma.deviceToken.findMany({
       where: { userId },
       select: { token: true, platform: true },
@@ -84,7 +98,9 @@ export class NotificationsService {
       );
     }
   }
-    /** AI discovered a match for this user's wants. */
+
+  // ─── everything below is unchanged ────────────────────────────────
+
   async aiMatchFound(
     userId: string,
     data: {

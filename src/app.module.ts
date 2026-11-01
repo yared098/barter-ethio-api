@@ -21,6 +21,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { RequestsModule } from './requests/requests.module';
 import { BiddingModule } from './bidding/bidding.module';
 import { PaymentsModule } from './payments/payments.module';
+import { TelegramModule } from './telegram/telegram.module';
 @Module({
   imports: [
     // ─── Config with fail-fast env validation ───
@@ -52,7 +53,8 @@ import { PaymentsModule } from './payments/payments.module';
     RequestsModule,
     RequestsModule,
     BiddingModule,
-    PaymentsModule
+    PaymentsModule,
+    TelegramModule
   ],
   providers: [
     // ─── Guard order matters (top → bottom) ───
