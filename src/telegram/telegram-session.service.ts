@@ -1,22 +1,40 @@
 import { Injectable } from '@nestjs/common';
 import { Lang } from './telegram-i18n';
 
-const TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — persistent for bot
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface PostDraft {
+  categoryId?: string;
+  categoryName?: string;
+  title?: string;
+  description?: string;
+  type?: 'BUY' | 'BARTER' | 'EITHER';
+  budgetMin?: number;
+  budgetMax?: number;
+}
 
 export interface TelegramSession {
   jwt?: string;
   userId?: string;
   userName?: string;
   lang: Lang;
-  step?: 'awaiting_email' | 'awaiting_password';
+  step?:
+    | 'awaiting_email'
+    | 'awaiting_password'
+    | 'awaiting_title'
+    | 'awaiting_desc'
+    | 'awaiting_budget';
   pendingEmail?: string;
+  draft?: PostDraft;
+  // browse state
+  browsePage?: number;
+  browseCategory?: string;
   expiresAt: number;
 }
 
 @Injectable()
 export class TelegramSessionService {
   private store = new Map<string, TelegramSession>();
-
   private key(chatId: number | string) {
     return String(chatId);
   }
@@ -32,7 +50,10 @@ export class TelegramSessionService {
   }
 
   set(chatId: number | string, s: TelegramSession) {
-    this.store.set(this.key(chatId), { ...s, expiresAt: Date.now() + TTL_MS });
+    this.store.set(this.key(chatId), {
+      ...s,
+      expiresAt: Date.now() + TTL_MS,
+    });
   }
 
   patch(chatId: number | string, p: Partial<TelegramSession>) {
@@ -40,11 +61,12 @@ export class TelegramSessionService {
     this.set(chatId, { ...cur, ...p });
   }
 
-  clearLogin(chatId: number | string) {
+  clearStep(chatId: number | string) {
     const cur = this.get(chatId);
     if (!cur) return;
     delete cur.step;
     delete cur.pendingEmail;
+    delete cur.draft;
     this.set(chatId, cur);
   }
 
