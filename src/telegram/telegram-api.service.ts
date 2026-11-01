@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 
+// ⭐ HARDCODED — bot and API live on the same box, always talk plain HTTP loopback.
+// No env var, no fallback, no pm2 snapshot. Cannot fail.
+const BOT_API_BASE = 'http://127.0.0.1:3000/api/v1';
+
 @Injectable()
 export class TelegramApiService {
   private readonly log = new Logger(TelegramApiService.name);
@@ -9,34 +13,22 @@ export class TelegramApiService {
   private readonly botSecret: string;
 
   constructor(config: ConfigService) {
-    let base =
-      config.get<string>('API_INTERNAL_URL_telegram')?.trim() ||
-      config.get<string>('API_INTERNAL_URL_tele')?.trim() ||
-      'http://127.0.0.1:3000';
-    base = base.replace(/^["']|["']$/g, '');
-
-    try {
-      const u = new URL(base);
-      const isLocal =
-        u.hostname === '127.0.0.1' ||
-        u.hostname === 'localhost' ||
-        u.hostname === '::1';
-      if (isLocal && u.protocol === 'https:') {
-        u.protocol = 'http:';
-        base = u.toString().replace(/\/$/, '');
-      }
-    } catch { /* ignore */ }
-
-    const prefix = base.endsWith('/api/v1') ? '' : '/api/v1';
     this.http = axios.create({
-      baseURL: `${base}${prefix}`,
+      baseURL: BOT_API_BASE,
       timeout: 15_000,
-      proxy: false,
+      proxy: false,          // never let HTTPS_PROXY hijack internal calls
     });
+
     this.botSecret = config.get<string>('TELEGRAM_INTERNAL_SECRET') ?? '';
     this.log.log(
-      `Telegram API client → ${base}${prefix} | secretLen=${this.botSecret.length}`,
+      `Telegram API client → ${BOT_API_BASE} | secretLen=${this.botSecret.length}`,
     );
+    if (this.botSecret.length !== 64) {
+      this.log.error(
+        `⚠️ TELEGRAM_INTERNAL_SECRET wrong length (${this.botSecret.length}, expected 64). ` +
+          `Bot calls will 401. Clean the duplicate line in .env.`,
+      );
+    }
   }
 
   private H() {
