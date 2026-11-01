@@ -1,114 +1,144 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios, { AxiosInstance } from 'axios';
+import * as http from 'http';
 
-// ⭐ HARDCODED — bot and API live on the same box, always talk plain HTTP loopback.
-// No env var, no fallback, no pm2 snapshot. Cannot fail.
-const BOT_API_BASE = 'http://127.0.0.1:3000/api/v1';
+// ⭐ HARDCODED loopback — this service uses Node's raw http module,
+//    which CANNOT do TLS. EPROTO is impossible.
+const BASE_HOST = '127.0.0.1';
+const BASE_PORT = 3000;
+const BASE_PATH = '/api/v1';
 
 @Injectable()
 export class TelegramApiService {
   private readonly log = new Logger(TelegramApiService.name);
-  private readonly http: AxiosInstance;
   private readonly botSecret: string;
 
   constructor(config: ConfigService) {
-    this.http = axios.create({
-      baseURL: BOT_API_BASE,
-      timeout: 15_000,
-      proxy: false,          // never let HTTPS_PROXY hijack internal calls
-    });
-
     this.botSecret = config.get<string>('TELEGRAM_INTERNAL_SECRET') ?? '';
     this.log.log(
-      `Telegram API client → ${BOT_API_BASE} | secretLen=${this.botSecret.length}`,
+      `Telegram API client → http://${BASE_HOST}:${BASE_PORT}${BASE_PATH} | secretLen=${this.botSecret.length} | transport=node:http`,
     );
     if (this.botSecret.length !== 64) {
       this.log.error(
-        `⚠️ TELEGRAM_INTERNAL_SECRET wrong length (${this.botSecret.length}, expected 64). ` +
-          `Bot calls will 401. Clean the duplicate line in .env.`,
+        `⚠️ TELEGRAM_INTERNAL_SECRET wrong length (${this.botSecret.length}, expected 64)`,
       );
     }
   }
 
-  private H() {
-    return { headers: { 'x-bot-secret': this.botSecret } };
+  private request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: any,
+    authToken?: string,
+  ): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-bot-secret': this.botSecret,
+      };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+      const payload = body != null ? JSON.stringify(body) : undefined;
+      if (payload) headers['Content-Length'] = String(Buffer.byteLength(payload));
+
+      const req = http.request(
+        {
+          host: BASE_HOST,
+          port: BASE_PORT,
+          path: `${BASE_PATH}${path}`,
+          method,
+          headers,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            const status = res.statusCode ?? 0;
+            let parsed: any = {};
+            try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = text; }
+
+            if (status >= 200 && status < 300) {
+              resolve(parsed as T);
+            } else {
+              const err: any = new Error(
+                `HTTP ${status}: ${parsed?.message ?? text ?? 'error'}`,
+              );
+              err.response = { status, data: parsed };
+              reject(err);
+            }
+          });
+        },
+      );
+      req.on('error', (e) => reject(e));
+      req.setTimeout(15_000, () => {
+        req.destroy(new Error('timeout'));
+      });
+      if (payload) req.write(payload);
+      req.end();
+    });
   }
 
-  async telegramLookup(telegramId: string) {
-    const { data } = await this.http.post(
+  telegramLookup(telegramId: string) {
+    return this.request<{ accessToken: string; user: any }>(
+      'POST',
       '/auth/telegram',
       { telegramId },
-      this.H(),
     );
-    return data as { accessToken: string; user: any };
   }
 
-  async telegramLink(p: {
+  telegramLink(p: {
     email: string;
     password: string;
     telegramId: string;
     telegramUsername?: string;
   }) {
-    const { data } = await this.http.post('/auth/telegram/link', p, this.H());
-    return data as { accessToken: string; user: any };
+    return this.request<{ accessToken: string; user: any }>(
+      'POST',
+      '/auth/telegram/link',
+      p,
+    );
   }
 
-  async listRequests(
-    token: string,
-    page = 1,
-    limit = 5,
-    categoryId?: string,
-  ) {
-    const { data } = await this.http.get('/requests', {
-      headers: { Authorization: `Bearer ${token}` },
-      params: {
-        scope: 'all',
-        page,
-        limit,
-        ...(categoryId ? { categoryId } : {}),
-      },
+  listRequests(token: string, page = 1, limit = 5, categoryId?: string) {
+    const qs = new URLSearchParams({
+      scope: 'all',
+      page: String(page),
+      limit: String(limit),
+      ...(categoryId ? { categoryId } : {}),
     });
-    return data as { items: any[]; pagination: any };
+    return this.request<{ items: any[]; pagination: any }>(
+      'GET',
+      `/requests?${qs.toString()}`,
+      undefined,
+      token,
+    );
   }
 
-  async getRequest(token: string, id: string) {
-    const { data } = await this.http.get(`/requests/${id}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return data;
+  getRequest(token: string, id: string) {
+    return this.request<any>('GET', `/requests/${id}`, undefined, token);
   }
 
-  async categories() {
-    const { data } = await this.http.get('/categories');
-    return data as { id: string; name: string; icon?: string; slug: string }[];
+  categories() {
+    return this.request<{ id: string; name: string; icon?: string; slug: string }[]>(
+      'GET',
+      '/categories',
+    );
   }
 
-  async matches(token: string) {
-    const { data } = await this.http.get('/matches', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return data;
+  matches(token: string) {
+    return this.request<any>('GET', '/matches', undefined, token);
   }
 
-  async me(token: string) {
-    const { data } = await this.http.get('/auth/me', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return data;
+  me(token: string) {
+    return this.request<any>('GET', '/auth/me', undefined, token);
   }
 
-  async postingStatus(token: string) {
-    const { data } = await this.http.get('/users/me/posting-status', {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return data;
+  postingStatus(token: string) {
+    return this.request<any>('GET', '/users/me/posting-status', undefined, token);
   }
 
-  async createRequest(token: string, payload: any) {
-    const { data } = await this.http.post('/requests', payload, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return data;
+  createRequest(token: string, payload: any) {
+    return this.request<any>('POST', '/requests', payload, token);
   }
 }
