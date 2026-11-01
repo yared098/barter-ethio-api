@@ -28,16 +28,20 @@ export class TelegramNotifyService {
     const bot = this.telegram.getBot();
     if (!bot) return;
 
-    // build the message — HTML so we can bold the title
     const text = `🔔 <b>${this.esc(msg.title)}</b>\n\n${this.esc(msg.body)}`;
 
-    // inline button (only if actionUrl provided)
-    const replyMarkup =
-      msg.actionUrl && msg.actionLabel
-        ? {
-            inline_keyboard: [[{ text: msg.actionLabel, url: msg.actionUrl }]],
-          }
-        : undefined;
+    // ⭐ ONLY add a button if the URL is a scheme Telegram accepts.
+    //    Custom schemes like `barterethio://` cause a 400 Bad Request.
+    const isSafe =
+      !!msg.actionUrl &&
+      /^(https?:\/\/|tg:\/\/)/i.test(msg.actionUrl) &&
+      !!msg.actionLabel;
+
+    const replyMarkup = isSafe
+      ? {
+          inline_keyboard: [[{ text: msg.actionLabel!, url: msg.actionUrl! }]],
+        }
+      : undefined;
 
     try {
       await bot.telegram.sendMessage(user.telegramChatId, text, {

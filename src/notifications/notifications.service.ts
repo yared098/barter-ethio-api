@@ -202,13 +202,12 @@ export class NotificationsService {
   }
 
   // ⭐⭐ THE MAIN FIX — chat notification now shows the exact message
-  async newMessage(
+    async newMessage(
     recipientId: string,
     senderName: string,
     offerId: string,
     messageContent: string,
   ) {
-    // trim long messages — Telegram caps at 4096 chars, we cap at 300 for readability
     const trimmed =
       messageContent.length > 300
         ? `${messageContent.slice(0, 300)}…`
@@ -221,8 +220,11 @@ export class NotificationsService {
         type: 'offer.message',
         offerId,
         screen: 'offer-chat',
+        // for mobile app (ignored by Telegram)
         actionUrl: `barterethio://offer/${offerId}`,
-        actionLabel: '💬 Reply in app',
+        // for Telegram — falls back to a web link if app scheme exists
+        webUrl: `https://api.smrestaurant.com/api/v1/offers/${offerId}`,
+        actionLabel: '💬 Open offer',
       },
     });
   }
