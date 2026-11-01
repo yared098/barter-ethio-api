@@ -24,14 +24,19 @@ export class NotificationsService {
   async sendToUser(userId: string, payload: NotificationPayload): Promise<void> {
     // ⭐ FIRE-AND-FORGET Telegram push — fires regardless of FCM tokens
     void this.telegram
-      ?.sendToUser(userId, { title: payload.title, body: payload.body })
+      ?.sendToUser(userId, {
+        title: payload.title,
+        body: payload.body,
+        actionUrl: payload.data?.actionUrl,
+        actionLabel: payload.data?.actionLabel,
+      })
       .catch((e) =>
         this.logger.warn(
           `[TELEGRAM-PUSH-FAIL] user=${userId}: ${(e as Error).message}`,
         ),
       );
 
-    // ── existing FCM flow ─────────────────────────────────────────
+    // ── existing FCM flow (unchanged) ────────────────────────────
     const tokens = await this.prisma.deviceToken.findMany({
       where: { userId },
       select: { token: true, platform: true },
@@ -99,7 +104,9 @@ export class NotificationsService {
     }
   }
 
-  // ─── everything below is unchanged ────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════
+  // ⭐ UPDATED — chat / offer notifications now carry exact content
+  // ═══════════════════════════════════════════════════════════════
 
   async aiMatchFound(
     userId: string,
@@ -123,31 +130,57 @@ export class NotificationsService {
     });
   }
 
+  // ⭐ NEW — full message text in the notification
   async offerReceived(
     receiverId: string,
     senderName: string,
     productTitle: string,
     offerId: string,
+    offerMessage?: string,
   ) {
+    // trim to keep Telegram readable; long messages get cut with …
+    const snippet = offerMessage
+      ? offerMessage.length > 200
+        ? `${offerMessage.slice(0, 200)}…`
+        : offerMessage
+      : null;
+
+    const body = snippet
+      ? `"${snippet}"\n\n— ${senderName} wants to trade for your "${productTitle}"`
+      : `${senderName} wants to trade for your "${productTitle}"`;
+
     await this.sendToUser(receiverId, {
       title: 'New barter offer',
-      body: `${senderName} wants to trade for your "${productTitle}"`,
-      data: { type: 'offer.received', offerId, screen: 'offer-detail' },
+      body,
+      data: {
+        type: 'offer.received',
+        offerId,
+        screen: 'offer-detail',
+        // ⭐ optional deep link — only works if your app registers the scheme
+        actionUrl: `barterethio://offer/${offerId}`,
+        actionLabel: '💬 Open offer',
+      },
     });
   }
 
   async offerAccepted(senderId: string, receiverName: string, offerId: string) {
     await this.sendToUser(senderId, {
       title: 'Offer accepted 🎉',
-      body: `${receiverName} accepted your barter offer`,
-      data: { type: 'offer.accepted', offerId, screen: 'offer-detail' },
+      body: `${receiverName} accepted your barter offer — time to chat and finalize the swap.`,
+      data: {
+        type: 'offer.accepted',
+        offerId,
+        screen: 'offer-detail',
+        actionUrl: `barterethio://offer/${offerId}`,
+        actionLabel: '💬 Open chat',
+      },
     });
   }
 
   async offerDeclined(senderId: string, receiverName: string, offerId: string) {
     await this.sendToUser(senderId, {
       title: 'Offer declined',
-      body: `${receiverName} declined your offer`,
+      body: `${receiverName} declined your offer. You can try another item or send a new offer.`,
       data: { type: 'offer.declined', offerId, screen: 'offer-detail' },
     });
   }
@@ -155,7 +188,7 @@ export class NotificationsService {
   async offerCancelled(receiverId: string, senderName: string, offerId: string) {
     await this.sendToUser(receiverId, {
       title: 'Offer cancelled',
-      body: `${senderName} cancelled their offer`,
+      body: `${senderName} cancelled their offer.`,
       data: { type: 'offer.cancelled', offerId, screen: 'offer-detail' },
     });
   }
@@ -168,11 +201,29 @@ export class NotificationsService {
     });
   }
 
-  async newMessage(recipientId: string, senderName: string, offerId: string) {
+  // ⭐⭐ THE MAIN FIX — chat notification now shows the exact message
+  async newMessage(
+    recipientId: string,
+    senderName: string,
+    offerId: string,
+    messageContent: string,
+  ) {
+    // trim long messages — Telegram caps at 4096 chars, we cap at 300 for readability
+    const trimmed =
+      messageContent.length > 300
+        ? `${messageContent.slice(0, 300)}…`
+        : messageContent;
+
     await this.sendToUser(recipientId, {
-      title: `New message from ${senderName}`,
-      body: 'Tap to open the conversation',
-      data: { type: 'offer.message', offerId, screen: 'offer-chat' },
+      title: `💬 ${senderName}`,
+      body: `"${trimmed}"`,
+      data: {
+        type: 'offer.message',
+        offerId,
+        screen: 'offer-chat',
+        actionUrl: `barterethio://offer/${offerId}`,
+        actionLabel: '💬 Reply in app',
+      },
     });
   }
 }
