@@ -12,7 +12,7 @@ export class TelegramApiService {
     const base =
       config.get<string>('API_INTERNAL_URL') ??
       config.get<string>('API_PUBLIC_URL') ??
-      'http://127.0.0.1:3000';
+      'https://api.smrestaurant.com/api/v1';
     const prefix = base.endsWith('/api/v1') ? '' : '/api/v1';
     this.http = axios.create({
       baseURL: `${base}${prefix}`,
