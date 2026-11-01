@@ -507,7 +507,7 @@ export class PaymentsService {
 
   // ⭐ Chapa server-side email validator rejects `.local`, `.test`, etc.
   private _safeChapaEmail(raw?: string | null): string {
-    const fallback = 'noreply@barterethio.com';
+    const fallback = 'yades.dev@gmail.com';
     if (!raw) return fallback;
 
     const email = raw.trim().toLowerCase();
