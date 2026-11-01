@@ -66,16 +66,45 @@ async function bootstrap() {
     !!process.env.RENDER ||
     !!process.env.RAILWAY_ENVIRONMENT;
 
-  if (isProd && !proxyTerminatesSsl) {
+  // if (isProd && !proxyTerminatesSsl) {
+  //   app.use((req: any, res: any, next: any) => {
+  //     const proto = req.header('x-forwarded-proto') ?? req.protocol;
+  //     const host = req.header('host') ?? '';
+  //     if (proto !== 'https' && host && !host.includes('localhost')) {
+  //       return res.redirect(301, `https://${host}${req.url}`);
+  //     }
+  //     next();
+  //   });
+  //   logger.log('✅ HTTPS redirect enabled (app-level)');
+  // } else if (isProd) {
+  //   logger.log('⏭️  HTTPS redirect skipped (proxy handles SSL)');
+  // }  
+    if (isProd && !proxyTerminatesSsl) {
     app.use((req: any, res: any, next: any) => {
+      // ⭐ Loopback requests (bot ↔ API, health checks, cron) must NEVER be
+      //    redirected — they can't speak TLS and live on the same box.
+      const remote = req.socket?.remoteAddress ?? '';
+      const isLoopbackRemote =
+        remote === '127.0.0.1' ||
+        remote === '::1' ||
+        remote === '::ffff:127.0.0.1';
+
+      const host = (req.header('host') ?? '').toLowerCase();
+      const isLoopbackHost =
+        host.startsWith('127.0.0.1') ||
+        host.startsWith('localhost') ||
+        host.startsWith('[::1]') ||
+        host.startsWith('0.0.0.0');
+
+      if (isLoopbackRemote || isLoopbackHost) return next();
+
       const proto = req.header('x-forwarded-proto') ?? req.protocol;
-      const host = req.header('host') ?? '';
-      if (proto !== 'https' && host && !host.includes('localhost')) {
+      if (proto !== 'https' && host) {
         return res.redirect(301, `https://${host}${req.url}`);
       }
       next();
     });
-    logger.log('✅ HTTPS redirect enabled (app-level)');
+    logger.log('✅ HTTPS redirect enabled (app-level, loopback exempt)');
   } else if (isProd) {
     logger.log('⏭️  HTTPS redirect skipped (proxy handles SSL)');
   }
