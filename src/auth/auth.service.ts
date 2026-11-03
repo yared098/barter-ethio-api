@@ -244,10 +244,6 @@ export class AuthService {
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Account is disabled');
     }
-    if (user.telegramChatId) {
-      return { linked: true };
-    }
-
     const code = crypto.randomBytes(8).toString('hex').toUpperCase();
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const now = new Date();
@@ -263,7 +259,7 @@ export class AuthService {
       });
     });
 
-    return { linked: false, code, expiresAt };
+    return { linked: Boolean(user.telegramChatId), code, expiresAt };
   }
 
   async completeTelegramLink(dto: {

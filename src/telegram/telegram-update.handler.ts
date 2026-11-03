@@ -30,6 +30,7 @@ export class TelegramUpdateHandler {
     });
 
     bot.start((ctx) => this.onStart(ctx));
+    bot.command('logout', (ctx) => this.onLogout(ctx));
     bot.command('link', (ctx) => {
       const text = 'text' in ctx.message ? ctx.message.text : '';
       const code = text.trim().split(/\s+/)[1] ?? '';
@@ -65,6 +66,10 @@ export class TelegramUpdateHandler {
     bot.action(/^menu:lang$/, async (ctx) => {
       await ctx.answerCbQuery();
       return this.onLangPicker(ctx, true);
+    });
+    bot.action(/^menu:logout$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      return this.onLogout(ctx);
     });
 
     // ── browse ────────────────────────────────────────────
@@ -204,6 +209,7 @@ export class TelegramUpdateHandler {
 
     const key = String(chatId);
     const s = this.session.get(chatId);
+    if (s?.botLoggedOut) return false;
     if (s?.jwt && this.isAccessTokenFresh(s.jwt)) return true;
 
     const inflight = this.loginInFlight.get(key);
@@ -214,6 +220,7 @@ export class TelegramUpdateHandler {
         const resp = await this.api.telegramLookup(String(from.id));
         this.session.set(chatId, {
           ...s,
+          botLoggedOut: false,
           lang: s?.lang ?? 'en',
           jwt: resp.accessToken,
           userId: resp.user.id,
@@ -269,6 +276,19 @@ export class TelegramUpdateHandler {
     );
   }
 
+  private async onLogout(ctx: any) {
+    const id = ctx.chat.id;
+    const previous = this.session.get(id);
+    this.session.set(id, {
+      lang: previous?.lang ?? 'en',
+      botLoggedOut: true,
+    });
+    return ctx.reply(
+      'You are logged out of the bot. To reconnect, sign in to the same Barter Ethio account on the website, generate a Telegram link code from your dashboard, and send `/link CODE` here. Your account remains linked until you reconnect.',
+      { parse_mode: 'Markdown' },
+    );
+  }
+
   private async delMsg(ctx: any, msgId: number) {
     try {
       await ctx.telegram.deleteMessage(ctx.chat!.id, msgId);
@@ -309,7 +329,10 @@ export class TelegramUpdateHandler {
 
     if (s?.jwt) return this.showHome(ctx, false);
 
-    this.session.set(id, { lang: s?.lang ?? 'en' });
+    this.session.set(id, {
+      lang: s?.lang ?? 'en',
+      botLoggedOut: s?.botLoggedOut,
+    });
     return ctx.reply(
       'To use your existing Barter Ethio account here, sign in on the website, generate a Telegram link code from your dashboard, then send `/link CODE` in this chat. The code expires after 10 minutes and can only be used once.',
       { parse_mode: 'Markdown' },
@@ -361,6 +384,8 @@ export class TelegramUpdateHandler {
     return ctx.reply(
       '*Commands*\n' +
         '/start — main menu\n' +
+        '/logout — log out of the bot\n' +
+        '/link CODE — reconnect with a one-time website code\n' +
         '/browse — wanted board\n' +
         '/post — post a request\n' +
         'Use “Post product” in the menu to list a product.\n' +
@@ -760,9 +785,17 @@ export class TelegramUpdateHandler {
   private async onPostBudgetSkip(ctx: any) {
     const id = ctx.chat.id;
     const s = this.session.get(id)!;
-    s.step = undefined;
-    this.session.set(id, s);
-    return this.showPostConfirm(ctx, true);
+    await ctx.editMessageText('Budget skipped.');
+    return this.promptPostLocation(ctx);
+  }
+
+  private async promptPostLocation(ctx: any) {
+    const id = ctx.chat.id;
+    this.session.patch(id, { step: 'awaiting_post_location' });
+    return ctx.reply(
+      '📍 Share your exact location to add it to this request, or choose “Skip location”. Only share if you are comfortable including these coordinates.',
+      kb.postLocation(),
+    );
   }
 
   private async onPostConfirm(ctx: any) {
@@ -781,6 +814,11 @@ export class TelegramUpdateHandler {
         type: s.draft.type ?? 'BUY',
         ...(s.draft.budgetMin != null && { budgetMin: s.draft.budgetMin }),
         ...(s.draft.budgetMax != null && { budgetMax: s.draft.budgetMax }),
+        ...(s.draft.latitude != null &&
+          s.draft.longitude != null && {
+            latitude: s.draft.latitude,
+            longitude: s.draft.longitude,
+          }),
       };
       const created = await this.api.createRequest(s.jwt, payload);
       this.session.clearStep(id);
@@ -814,9 +852,15 @@ export class TelegramUpdateHandler {
           ? `${d.budgetMin ?? 0}–${d.budgetMax ?? '∞'} ETB`
           : '—',
       );
+    const location =
+      d.latitude != null && d.longitude != null
+        ? `\n📍 Location: ${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
+        : '\n📍 Location: not shared';
 
     const opts = { parse_mode: 'Markdown' as const, ...kb.postConfirm() };
-    return edit ? ctx.editMessageText(text, opts) : ctx.reply(text, opts);
+    return edit
+      ? ctx.editMessageText(`${text}${location}`, opts)
+      : ctx.reply(`${text}${location}`, opts);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -950,8 +994,27 @@ export class TelegramUpdateHandler {
         );
       }
       s.draft = { ...(s.draft ?? {}), budgetMin: min, budgetMax: max };
+      this.session.set(id, s);
+      return this.promptPostLocation(ctx);
+    }
+
+    if (s.step === 'awaiting_post_location') {
+      if (text.toLowerCase() !== 'skip location') {
+        return ctx.reply(
+          'Use “Share exact location” or “Skip location” to continue.',
+          kb.postLocation(),
+        );
+      }
+      s.draft = {
+        ...(s.draft ?? {}),
+        latitude: undefined,
+        longitude: undefined,
+      };
       s.step = undefined;
       this.session.set(id, s);
+      await ctx.reply('Location skipped.', {
+        reply_markup: { remove_keyboard: true },
+      });
       return this.showPostConfirm(ctx, false);
     }
 
@@ -996,7 +1059,31 @@ export class TelegramUpdateHandler {
     const id = ctx.chat.id;
     const session = this.session.get(id);
     const location = ctx.message.location;
-    if (session?.step !== 'awaiting_reply_location' || !location) return;
+    if (!location) return;
+
+    if (session?.step === 'awaiting_post_location') {
+      if (
+        !Number.isFinite(location.latitude) ||
+        !Number.isFinite(location.longitude) ||
+        Math.abs(location.latitude) > 90 ||
+        Math.abs(location.longitude) > 180
+      ) {
+        return ctx.reply('That location is invalid. Please share it again or skip.');
+      }
+      session.draft = {
+        ...(session.draft ?? {}),
+        latitude: location.latitude,
+        longitude: location.longitude,
+      };
+      session.step = undefined;
+      this.session.set(id, session);
+      await ctx.reply('Exact location added.', {
+        reply_markup: { remove_keyboard: true },
+      });
+      return this.showPostConfirm(ctx, false);
+    }
+
+    if (session?.step !== 'awaiting_reply_location') return;
 
     this.session.patch(id, {
       step: 'awaiting_reply',

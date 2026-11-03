@@ -36,6 +36,12 @@ Telegram identity supplied by the bot to the signed-in account. Deploy the API
 and web changes before using this flow; the API deployment applies the new
 Prisma migration.
 
+The bot menu also has **Log out** (or `/logout`). This clears the bot session
+without unlinking the account. To reconnect, generate a fresh code on the
+website dashboard and send `/link CODE` to the bot. When posting a new request
+through Telegram, users can optionally share their exact coordinates or skip
+location; coordinates are stored with that request.
+
 ## Shared hosting with PM2 (no root access)
 
 The existing PM2 app is named `barter-ethio-api` and its ecosystem config uses

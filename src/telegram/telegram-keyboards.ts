@@ -16,6 +16,7 @@ export const kb = {
         Markup.button.callback('👤 Me', 'menu:me'),
       ],
       [Markup.button.callback('🌐 Language', 'menu:lang')],
+      [Markup.button.callback('🚪 Log out', 'menu:logout')],
     ]),
 
   // ── browse ────────────────────────────────────────────────
@@ -153,6 +154,14 @@ export const kb = {
   requestLocation: (): ReturnType<typeof Markup.keyboard> =>
     Markup.keyboard([
       [Markup.button.locationRequest('📍 Share my location')],
+    ])
+      .oneTime()
+      .resize(),
+
+  postLocation: (): ReturnType<typeof Markup.keyboard> =>
+    Markup.keyboard([
+      [Markup.button.locationRequest('📍 Share exact location')],
+      [Markup.button.text('Skip location')],
     ])
       .oneTime()
       .resize(),

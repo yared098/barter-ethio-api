@@ -9,6 +9,8 @@ export interface PostDraft {
   type?: 'BUY' | 'BARTER' | 'EITHER';
   budgetMin?: number;
   budgetMax?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface ProductDraft {
@@ -26,6 +28,7 @@ export interface TelegramSession {
   jwt?: string;
   userId?: string;
   userName?: string;
+  botLoggedOut?: boolean;
   lang: Lang;
   step?:
     | 'awaiting_email'
@@ -33,6 +36,7 @@ export interface TelegramSession {
     | 'awaiting_title'
     | 'awaiting_desc'
     | 'awaiting_budget'
+    | 'awaiting_post_location'
     | 'awaiting_reply'
     | 'awaiting_reply_location'
     | 'awaiting_product_title'
