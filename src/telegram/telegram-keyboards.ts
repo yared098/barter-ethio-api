@@ -19,6 +19,11 @@ export const kb = {
       [Markup.button.callback('🚪 Log out', 'menu:logout')],
     ]),
 
+  login: (url: string): IK =>
+    Markup.inlineKeyboard([
+      [Markup.button.url('🔐 Sign in to Barter Ethio', url)],
+    ]),
+
   // ── browse ────────────────────────────────────────────────
   browseMenu: (
     page: number,

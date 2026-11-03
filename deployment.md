@@ -16,14 +16,18 @@ existing HTTPS site. For the supplied site URL, set the API server's existing
 `.env` value to:
 
 ```env
+FRONTEND_URL=https://warm-cobbler-1586ce.netlify.app
 TELEGRAM_WEB_APP_URL=https://warm-cobbler-1586ce.netlify.app/chat
 ```
 
-This is the chat route base, without a specific offer ID. When a user receives
-an offer or message, the bot appends that offer's ID and opens the chat inside
-Telegram. Make sure the Netlify frontend's server-side `API_URL` points to the
-deployed API. In BotFather, configure the bot's Mini App/domain to use
-`warm-cobbler-1586ce.netlify.app`.
+`FRONTEND_URL` is used by the bot's first-time `/start` message to open the
+website sign-in page in a browser. Users can sign in with Google, choose their
+Google account, then generate a Telegram link code on the dashboard.
+`TELEGRAM_WEB_APP_URL` is the chat route base, without a specific offer ID.
+When a user receives an offer or message, the bot appends that offer's ID and
+opens the chat inside Telegram. Make sure the Netlify frontend's server-side
+`API_URL` points to the deployed API. In BotFather, configure the bot's Mini
+App/domain to use `warm-cobbler-1586ce.netlify.app`.
 
 The Web App validates Telegram's signed launch data on the API and only permits
 the Telegram account already linked to a Barter user. Both chat participants
@@ -108,13 +112,13 @@ For this project, set the Telegram Web App URL in the server's existing
 `/home/smrestpr/barter-ethio-api/.env`:
 
 ```env
+FRONTEND_URL=https://warm-cobbler-1586ce.netlify.app
 TELEGRAM_WEB_APP_URL=https://warm-cobbler-1586ce.netlify.app/chat
 ```
 
 Edit that file with `nano .env`; do not replace the rest of the production
-environment with a local `.env` or `.env.production.example`. The API falls
-back to this supplied Netlify chat URL if the setting is omitted. Then run the
-deploy block above.
+environment with a local `.env` or `.env.production.example`. Restart the API
+with the deploy block above after changing it.
 
 The server must already have its own `.env` with the production database URL,
 JWT secret, Google OAuth client ID, CORS origins, and any enabled integration

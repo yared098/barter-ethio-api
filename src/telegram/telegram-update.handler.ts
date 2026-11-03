@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
 import { Message } from 'telegraf/typings/core/types/typegram';
 import { TelegramApiService } from './telegram-api.service';
@@ -18,6 +19,7 @@ export class TelegramUpdateHandler {
   constructor(
     private readonly api: TelegramApiService,
     private readonly session: TelegramSessionService,
+    private readonly config: ConfigService,
   ) {}
 
   register(bot: Telegraf) {
@@ -333,10 +335,37 @@ export class TelegramUpdateHandler {
       lang: s?.lang ?? 'en',
       botLoggedOut: s?.botLoggedOut,
     });
+    const frontendUrl = this.getFrontendLoginUrl();
+    const loginKeyboard = frontendUrl ? kb.login(frontendUrl) : undefined;
+    if (!frontendUrl) {
+      this.log.error(
+        'Cannot show Telegram sign-in button: configure FRONTEND_URL or TELEGRAM_WEB_APP_URL',
+      );
+    }
     return ctx.reply(
-      'To use your existing Barter Ethio account here, sign in on the website, generate a Telegram link code from your dashboard, then send `/link CODE` in this chat. The code expires after 10 minutes and can only be used once.',
-      { parse_mode: 'Markdown' },
+      'Sign in to your Barter Ethio account in the browser. After sign-in, open your dashboard, create a Telegram link code, then return here and send `/link CODE`. The code expires after 10 minutes and can only be used once.',
+      {
+        parse_mode: 'Markdown',
+        ...(loginKeyboard ?? {}),
+      },
     );
+  }
+
+  private getFrontendLoginUrl(): string | null {
+    const configured =
+      this.config.get<string>('FRONTEND_URL')?.trim() ||
+      this.config.get<string>('TELEGRAM_WEB_APP_URL')?.trim();
+    if (!configured) return null;
+
+    try {
+      const base = new URL(configured);
+      if (base.protocol !== 'https:') return null;
+      const login = new URL('/auth/login', base.origin);
+      login.searchParams.set('next', '/dashboard');
+      return login.toString();
+    } catch {
+      return null;
+    }
   }
 
   private async onTelegramLink(ctx: any, code: string) {
@@ -369,10 +398,31 @@ export class TelegramUpdateHandler {
       );
     } catch (error: any) {
       const status = error?.response?.status;
-      this.log.warn(`Telegram account linking failed: ${(error as Error).message}`);
-      if (status === 401 || status === 409) {
+      const apiMessage = error?.response?.data?.message;
+      const message = Array.isArray(apiMessage)
+        ? apiMessage.join(', ')
+        : String(apiMessage ?? error?.message ?? 'unknown error');
+      this.log.warn(
+        `Telegram account linking failed (HTTP ${status ?? 'unknown'}): ${message}`,
+      );
+      if (status === 401 && message.toLowerCase().includes('bot secret')) {
         return ctx.reply(
-          'This code is invalid, expired, already used, or belongs to an account linked to another Telegram user. Generate a new code from your dashboard and try again.',
+          'The bot cannot securely reach the API right now. Please contact support; do not generate or share another code yet.',
+        );
+      }
+      if (status === 409) {
+        return ctx.reply(
+          'This Barter account or Telegram account is already linked to a different account. Sign in to the correct Barter account, or contact support if you need to change the link.',
+        );
+      }
+      if (
+        status === 401 &&
+        (message.toLowerCase().includes('link code') ||
+          message.toLowerCase().includes('already used') ||
+          message.toLowerCase().includes('expired'))
+      ) {
+        return ctx.reply(
+          'This code is invalid, expired, or already used. Generate a fresh code from your dashboard and send it within 10 minutes.',
         );
       }
       return ctx.reply('Could not link your account right now. Please try again later.');
