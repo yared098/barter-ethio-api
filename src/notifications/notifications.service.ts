@@ -158,7 +158,7 @@ export class NotificationsService {
         screen: 'offer-detail',
         // Telegram turns this into a signed Web App button when configured.
         actionUrl: `barterethio://offer/${offerId}`,
-        actionLabel: '💬 Open offer',
+        actionLabel: '💬 View offer & reply',
       },
     });
   }
@@ -172,7 +172,7 @@ export class NotificationsService {
         offerId,
         screen: 'offer-detail',
         actionUrl: `barterethio://offer/${offerId}`,
-        actionLabel: '💬 Open chat',
+        actionLabel: '💬 Open chat & reply',
       },
     });
   }
@@ -222,7 +222,7 @@ export class NotificationsService {
         screen: 'offer-chat',
         // for mobile app (ignored by Telegram)
         actionUrl: `barterethio://offer/${offerId}`,
-        actionLabel: '💬 Open offer',
+        actionLabel: '💬 Open chat & reply',
       },
     });
   }

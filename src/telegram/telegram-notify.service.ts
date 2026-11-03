@@ -78,7 +78,9 @@ export class TelegramNotifyService {
 
   private chatWebAppUrl(offerId?: string): string | undefined {
     if (!offerId) return undefined;
-    const configuredUrl = this.config.get<string>('TELEGRAM_WEB_APP_URL');
+    const configuredUrl =
+      this.config.get<string>('TELEGRAM_WEB_APP_URL') ||
+      'https://warm-cobbler-1586ce.netlify.app/chat';
     if (!configuredUrl) return undefined;
 
     const base = new URL(configuredUrl);

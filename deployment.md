@@ -37,9 +37,11 @@ as your hosting account user, without `sudo`. They use the `.env` already on
 the server; do not copy this project's local `.env` or replace the server's
 environment file.
 
-### Deploy updates
+### Deploy API updates
 
-After pushing changes to GitHub, SSH into the server and run:
+After pushing API changes to GitHub, SSH into the server and run this as one
+block. It stops on the first failure and starts the app whether PM2 currently
+has it stopped or running:
 
 ```sh
 (
@@ -47,27 +49,32 @@ After pushing changes to GitHub, SSH into the server and run:
   cd /home/smrestpr/barter-ethio-api
   git pull --ff-only
   export PNPM_CONFIG_CHILD_CONCURRENCY=1
+  export UV_THREADPOOL_SIZE=1
   export RAYON_NUM_THREADS=1
   export TOKIO_WORKER_THREADS=1
   export CARGO_BUILD_JOBS=1
-  export UV_THREADPOOL_SIZE=2
-  pnpm install --frozen-lockfile
+  export NODE_OPTIONS=--v8-pool-size=1
+  pnpm install --frozen-lockfile --child-concurrency=1
   pnpm exec prisma generate
   pnpm exec prisma migrate deploy
   pnpm run build
+  test -f dist/main.js
   mkdir -p uploads
-  pm2 reload barter-ethio-api --update-env
+  pm2 startOrRestart ecosystem.config.js \
+    --only barter-ethio-api --update-env
+  pm2 save
   pm2 status
 )
 ```
 
 `pnpm install` installs the exact locked dependencies. Prisma Client is
 generated, committed database migrations are applied to the database selected
-by the server's existing `.env`, the API is compiled, and PM2 reloads the
-existing app. The `.env` file and uploaded files are not changed by `git pull`.
-The pnpm/Rust thread limits reduce parallel work for shared hosting. The
-commands run in a fail-fast subshell, so an install, migration, or build error
-stops before PM2 reloads.
+by the server's existing `.env`, and the API is compiled before PM2 starts or
+restarts it. `startOrRestart` handles both an existing stopped PM2 entry and a
+first start from the ecosystem file. The `.env` file and uploaded files are
+not changed by `git pull`. The process/thread limits reduce parallel work for
+shared hosting. The commands run in a fail-fast subshell, so an install,
+migration, or build error stops before PM2 starts the app.
 
 If an earlier install failed with `failed to spawn thread` or `Resource
 temporarily unavailable`, rerun this complete update block after the fix has
@@ -79,40 +86,33 @@ the commands; do not install packages globally or use `sudo`.
 
 ### First PM2 start only
 
-If this is a new clone and PM2 has not registered the API yet, set the
-`cwd` in `ecosystem.config.js` to the actual absolute clone path, then run:
+For a new clone, set the `cwd` in `ecosystem.config.js` to the actual absolute
+clone path. Create and configure the server `.env` before running the deploy
+block above. Do not separately start a second copy of this API after that
+block has registered the PM2 app.
 
-```sh
-(
-  set -e
-  cd /home/smrestpr/barter-ethio-api
-  export PNPM_CONFIG_CHILD_CONCURRENCY=1
-  export RAYON_NUM_THREADS=1
-  export TOKIO_WORKER_THREADS=1
-  export CARGO_BUILD_JOBS=1
-  export UV_THREADPOOL_SIZE=2
-  pnpm install --frozen-lockfile
-  pnpm exec prisma generate
-  pnpm exec prisma migrate deploy
-  pnpm run build
-  mkdir -p uploads
-  pm2 start ecosystem.config.js --only barter-ethio-api
-  pm2 save
-  pm2 status
-)
+For this project, set the Telegram Web App URL in the server's existing
+`/home/smrestpr/barter-ethio-api/.env`:
+
+```env
+TELEGRAM_WEB_APP_URL=https://warm-cobbler-1586ce.netlify.app/chat
 ```
+
+Edit that file with `nano .env`; do not replace the rest of the production
+environment with a local `.env` or `.env.production.example`. The API falls
+back to this supplied Netlify chat URL if the setting is omitted. Then run the
+deploy block above.
 
 The server must already have its own `.env` with the production database URL,
 JWT secret, Google OAuth client ID, CORS origins, and any enabled integration
 settings. Do not copy `.env.production.example` or a local `.env` over it.
 
-For Telegram chat buttons, set `TELEGRAM_WEB_APP_URL` in the server's existing
-`.env` to the HTTPS chat route base, for example
-`https://warm-cobbler-1586ce.netlify.app/chat` (do not include an offer ID).
-Configure the same site domain for the bot's Mini App in BotFather. The API
-will add each offer ID to that base URL. Telegram polling must run in only one
-process for this bot token; a `409 Conflict` means another process is already
-polling, so stop the duplicate process rather than retrying it.
+Deploy the separate `barter_ethio_web` repository to Netlify as well. Its
+server-side `API_URL` must point to the deployed API. Configure
+`warm-cobbler-1586ce.netlify.app` as the bot's Mini App domain in BotFather.
+Telegram long polling must run in only one process for this bot token. If logs
+show `409 Conflict`, find and stop the other PM2 app/server/local process using
+the token; restarting this API repeatedly will not resolve a duplicate poller.
 
 ## Docker Compose on an Ubuntu VPS
 
