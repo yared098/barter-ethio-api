@@ -343,7 +343,7 @@ export class TelegramUpdateHandler {
       );
     }
     return ctx.reply(
-      'Sign in to your Barter Ethio account in the browser. After sign-in, open your dashboard, create a Telegram link code, then return here and send `/link CODE`. The code expires after 10 minutes and can only be used once.',
+      'Sign in to your Barter Ethio account in the browser. After sign-in, open your dashboard, create a Telegram link code, then return here and send `/link CODE`. The code expires after 1 minute and can only be used once.',
       {
         parse_mode: 'Markdown',
         ...(loginKeyboard ?? {}),
@@ -422,7 +422,7 @@ export class TelegramUpdateHandler {
           message.toLowerCase().includes('expired'))
       ) {
         return ctx.reply(
-          'This code is invalid, expired, or already used. Generate a fresh code from your dashboard and send it within 10 minutes.',
+          'This code is invalid, expired, or already used. Generate a fresh code from your dashboard and send it within 1 minute.',
         );
       }
       return ctx.reply('Could not link your account right now. Please try again later.');

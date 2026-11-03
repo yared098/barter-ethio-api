@@ -247,7 +247,7 @@ export class AuthService {
     const code = crypto.randomBytes(8).toString('hex').toUpperCase();
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+    const expiresAt = new Date(now.getTime() + 60 * 1000);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.telegramLinkCode.updateMany({
@@ -279,7 +279,12 @@ export class AuthService {
         const challenge = await tx.telegramLinkCode.findUnique({
           where: { codeHash },
         });
-        if (!challenge || challenge.usedAt || challenge.expiresAt <= now) {
+        if (
+          !challenge ||
+          challenge.usedAt ||
+          challenge.expiresAt <= now ||
+          challenge.createdAt.getTime() + 60_000 <= now.getTime()
+        ) {
           throw new UnauthorizedException(
             'Link code is invalid, expired, or already used',
           );
@@ -314,6 +319,7 @@ export class AuthService {
             id: challenge.id,
             usedAt: null,
             expiresAt: { gt: now },
+            createdAt: { gt: new Date(now.getTime() - 60_000) },
           },
           data: { usedAt: now },
         });

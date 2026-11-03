@@ -35,7 +35,7 @@ can open the same offer chat; the normal offer authorization checks still apply.
 
 To link an existing account, sign in to the website and use **Link Telegram**
 on the dashboard. Send the displayed `/link CODE` command to the bot within
-10 minutes. The code is single-use, stored hashed by the API, and binds the
+1 minute. The code is single-use, stored hashed by the API, and binds the
 Telegram identity supplied by the bot to the signed-in account. Deploy the API
 and web changes before using this flow; the API deployment applies the new
 Prisma migration.
