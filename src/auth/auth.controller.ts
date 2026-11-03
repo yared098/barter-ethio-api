@@ -21,6 +21,7 @@ import { RegisterDto } from './dto/register.dto';
 import { TelegramLookupDto } from 'src/telegram/dto/telegram-lookup.dto';
 import { TelegramLinkDto } from 'src/telegram/dto/telegram-link.dto';
 import { TelegramWebAppLoginDto } from './dto/telegram-webapp-login.dto';
+import { TelegramLinkCompleteDto } from './dto/telegram-link-complete.dto';
 // import { TelegramLinkDto } from './dto/telegram-link.dto';
 // import { TelegramLookupDto } from './dto/telegram-lookup.dto';
 
@@ -68,6 +69,11 @@ export class AuthController {
     return this.auth.telegramWebAppLogin(dto.initData);
   }
 
+  @Post('telegram/link-code')
+  createTelegramLinkCode(@CurrentUser('id') userId: string) {
+    return this.auth.createTelegramLinkCode(userId);
+  }
+
   // ⭐ passwordless telegram — guarded by shared secret
   // ⭐ bot lookup — silent auto-login by telegram ID only
   @Public()
@@ -97,6 +103,20 @@ export class AuthController {
       throw new UnauthorizedException('Invalid bot secret');
     }
     return this.auth.telegramLink(dto);
+  }
+
+  @Public()
+  @Post('telegram/complete-link')
+  @HttpCode(HttpStatus.OK)
+  completeTelegramLink(
+    @Body() dto: TelegramLinkCompleteDto,
+    @Headers('x-bot-secret') botSecret: string,
+  ) {
+    const expected = this.config.get<string>('TELEGRAM_INTERNAL_SECRET');
+    if (!expected || botSecret !== expected) {
+      throw new UnauthorizedException('Invalid bot secret');
+    }
+    return this.auth.completeTelegramLink(dto);
   }
   // ── session ──
   @Public()

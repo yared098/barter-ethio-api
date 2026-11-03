@@ -30,6 +30,11 @@ export class TelegramUpdateHandler {
     });
 
     bot.start((ctx) => this.onStart(ctx));
+    bot.command('link', (ctx) => {
+      const text = 'text' in ctx.message ? ctx.message.text : '';
+      const code = text.trim().split(/\s+/)[1] ?? '';
+      return this.onTelegramLink(ctx, code);
+    });
     bot.help((ctx) => this.onHelp(ctx));
 
     // ── menu ──────────────────────────────────────────────
@@ -301,19 +306,54 @@ export class TelegramUpdateHandler {
   private async onStart(ctx: any) {
     const id = ctx.chat.id;
     const s = this.session.get(id);
-    const L = t(this.lang(id));
 
     if (s?.jwt) return this.showHome(ctx, false);
 
-    this.session.set(id, {
-      lang: s?.lang ?? 'en',
-      step: 'awaiting_email',
-    });
+    this.session.set(id, { lang: s?.lang ?? 'en' });
+    return ctx.reply(
+      'To use your existing Barter Ethio account here, sign in on the website, generate a Telegram link code from your dashboard, then send `/link CODE` in this chat. The code expires after 10 minutes and can only be used once.',
+      { parse_mode: 'Markdown' },
+    );
+  }
 
-    return ctx.reply(L.welcomeFirstTime, {
-      parse_mode: 'Markdown',
-      reply_markup: { force_reply: true, selective: true },
-    });
+  private async onTelegramLink(ctx: any, code: string) {
+    if (ctx.chat?.type !== 'private' || !ctx.from) {
+      return ctx.reply('Account linking is available in a private chat with this bot.');
+    }
+    if (!/^[A-Fa-f0-9]{16}$/.test(code)) {
+      return ctx.reply('Use the command `/link CODE` with the one-time code from your Barter Ethio dashboard.', {
+        parse_mode: 'Markdown',
+      });
+    }
+
+    try {
+      const result = await this.api.completeTelegramLink({
+        code: code.toUpperCase(),
+        telegramId: String(ctx.from.id),
+        telegramUsername: ctx.from.username,
+      });
+      const previous = this.session.get(ctx.chat.id);
+      this.session.set(ctx.chat.id, {
+        lang: previous?.lang ?? 'en',
+        jwt: result.accessToken,
+        userId: result.user.id,
+        userName:
+          result.user.name ?? result.user.email ?? ctx.from.username ?? 'User',
+      });
+      return ctx.reply(
+        'Your Telegram account is now linked to Barter Ethio. Chat notifications can open the conversation directly. Use /start to continue.',
+        kb.mainMenu(),
+      );
+    } catch (error: any) {
+      const status = error?.response?.status;
+      this.log.warn(`Telegram account linking failed: ${(error as Error).message}`);
+      if (status === 401 || status === 409) {
+        return ctx.reply(
+          'This code is invalid, expired, already used, or belongs to an account linked to another Telegram user. Generate a new code from your dashboard and try again.',
+        );
+      }
+      return ctx.reply('Could not link your account right now. Please try again later.');
+    }
   }
 
   private async onHelp(ctx: any) {

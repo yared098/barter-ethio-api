@@ -236,6 +236,123 @@ export class AuthService {
     return { user: this.sanitize(user), ...tokens };
   }
 
+  async createTelegramLinkCode(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, isActive: true, telegramChatId: true },
+    });
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Account is disabled');
+    }
+    if (user.telegramChatId) {
+      return { linked: true };
+    }
+
+    const code = crypto.randomBytes(8).toString('hex').toUpperCase();
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.telegramLinkCode.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: now },
+      });
+      await tx.telegramLinkCode.create({
+        data: { userId, codeHash, expiresAt },
+      });
+    });
+
+    return { linked: false, code, expiresAt };
+  }
+
+  async completeTelegramLink(dto: {
+    code: string;
+    telegramId: string;
+    telegramUsername?: string;
+  }) {
+    const codeHash = crypto
+      .createHash('sha256')
+      .update(dto.code.toUpperCase())
+      .digest('hex');
+    const now = new Date();
+
+    let user;
+    try {
+      user = await this.prisma.$transaction(async (tx) => {
+        const challenge = await tx.telegramLinkCode.findUnique({
+          where: { codeHash },
+        });
+        if (!challenge || challenge.usedAt || challenge.expiresAt <= now) {
+          throw new UnauthorizedException(
+            'Link code is invalid, expired, or already used',
+          );
+        }
+
+        const account = await tx.user.findUnique({
+          where: { id: challenge.userId },
+        });
+        if (!account || !account.isActive) {
+          throw new UnauthorizedException('Account is disabled');
+        }
+        if (
+          account.telegramChatId &&
+          account.telegramChatId !== dto.telegramId
+        ) {
+          throw new ConflictException(
+            'This Barter account is already linked to another Telegram account',
+          );
+        }
+
+        const existingTelegramUser = await tx.user.findUnique({
+          where: { telegramChatId: dto.telegramId },
+        });
+        if (existingTelegramUser && existingTelegramUser.id !== account.id) {
+          throw new ConflictException(
+            'This Telegram account is linked to another Barter account',
+          );
+        }
+
+        const claimed = await tx.telegramLinkCode.updateMany({
+          where: {
+            id: challenge.id,
+            usedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { usedAt: now },
+        });
+        if (claimed.count !== 1) {
+          throw new UnauthorizedException(
+            'Link code is invalid, expired, or already used',
+          );
+        }
+
+        return tx.user.update({
+          where: { id: account.id },
+          data: {
+            telegramChatId: dto.telegramId,
+            telegramUsername: dto.telegramUsername?.trim() || null,
+            telegramLinkedAt: now,
+          },
+        });
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'This Telegram account is linked to another Barter account',
+        );
+      }
+      throw error;
+    }
+
+    const accessToken = await this.tokens.issueAccessToken(user.id, user.role);
+    return { user: this.sanitize(user), accessToken };
+  }
+
   // ═══════════════════════════════════════════════════════════
   // SESSION
   // ═══════════════════════════════════════════════════════════

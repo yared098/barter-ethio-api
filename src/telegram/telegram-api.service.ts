@@ -100,6 +100,18 @@ export class TelegramApiService {
     );
   }
 
+  completeTelegramLink(p: {
+    code: string;
+    telegramId: string;
+    telegramUsername?: string;
+  }) {
+    return this.request<{ accessToken: string; user: any }>(
+      'POST',
+      '/auth/telegram/complete-link',
+      p,
+    );
+  }
+
   listRequests(token?: string, page = 1, limit = 5, categoryId?: string) {
     const qs = new URLSearchParams({
       scope: 'all',

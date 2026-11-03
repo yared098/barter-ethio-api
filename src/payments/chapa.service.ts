@@ -65,6 +65,12 @@ export class ChapaService {
     title: string;
     description: string;
   }): Promise<{ checkoutUrl: string }> {
+    const description =
+      p.description
+        .replace(/[^A-Za-z0-9 _.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'Barter payment';
+
     // ⭐ THE FIX — nested customization object + phone_number
     const body = {
       amount: p.amount.toFixed(2),
@@ -78,7 +84,7 @@ export class ChapaService {
       return_url: p.returnUrl,
       customization: {
         title: p.title,
-        description: p.description,
+        description,
       },
     };
 
