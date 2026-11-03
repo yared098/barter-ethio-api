@@ -95,7 +95,7 @@ The platform is **free** with a **PRO tier** that unlocks unlimited postings and
 
 ## Production Deployment
 
-For server setup, environment-file creation, Docker Compose startup, migrations,
-and future updates, follow [deployment.md](./deployment.md). The server uses
-its own ignored `.env.production`; never copy a developer or production
-environment file into Git.
+For deployment steps, including shared hosting with PM2 (no root access) and
+Docker Compose on a VPS, follow [deployment.md](./deployment.md). Keep the
+server's production environment file on the server; never copy your local
+`.env` into Git or over the server configuration.

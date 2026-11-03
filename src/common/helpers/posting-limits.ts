@@ -1,4 +1,9 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 export type PostingMode = 'PRO' | 'CREDIT' | 'DAILY' | 'FREE';
 
@@ -26,8 +31,8 @@ export const FREE_DAILY_CAP = 1;
 /** Paid tiers (DAILY / CREDIT / PRO): hard 2/day cap. */
 export const PAID_DAILY_CAP = 2;
 
-/** Daily pass: 10/day until midnight. */
-export const DAILY_PASS_CAP = 10;
+/** Daily pass: 2 posts before it expires at UTC midnight. */
+export const DAILY_PASS_CAP = 2;
 
 export function startOfTodayUtc(): Date {
   const d = new Date();
@@ -68,7 +73,11 @@ export function computePostingStatus(user: {
   const credits = user.creditsRemaining ?? 0;
 
   // ── 1. PRO ──
-  if (user.proExpiresAt && user.proExpiresAt > now) {
+  if (
+    user.proExpiresAt &&
+    user.proExpiresAt > now &&
+    (user.proBudgetRemaining ?? 0) > 0
+  ) {
     const budget = user.proBudgetRemaining ?? 0;
     const proDaysLeft = daysBetween(now, user.proExpiresAt);
     const dayLeft = Math.max(0, PAID_DAILY_CAP - usedToday);
@@ -150,7 +159,7 @@ export function computePostingStatus(user: {
     reason: canPost
       ? undefined
       : `Free plan: ${FREE_DAILY_CAP} post/day. ` +
-        'Pay 10 birr for a daily pass or 50 birr for 100 posts.',
+        'Pay 100 birr for a daily pass or 50 birr for 100 posts.',
     postsUsedToday: usedToday,
     dailyCap: FREE_DAILY_CAP,
     postsLeftToday: dayLeft,
@@ -167,10 +176,60 @@ export function computePostingStatus(user: {
  * Throws `BadRequestException` with a user-safe message if the user
  * cannot post right now. Returns the computed status otherwise.
  */
-export function assertCanPost(user: any): PostingStatus {
+export function assertCanPost(
+  user: Parameters<typeof computePostingStatus>[0],
+): PostingStatus {
   const status = computePostingStatus(user);
   if (!status.canPost) {
     throw new BadRequestException(status.reason);
   }
+  return status;
+}
+
+/**
+ * Atomically reserves one post against the user's daily and plan balance.
+ * The conditional update prevents parallel requests from consuming the same
+ * remaining allowance.
+ */
+export async function reservePostingQuota(
+  tx: Prisma.TransactionClient,
+  userId: string,
+): Promise<PostingStatus> {
+  const user = await tx.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundException('User not found');
+
+  const status = assertCanPost(user);
+  const todayStart = startOfTodayUtc();
+  const isNewDay = !user.postsTodayDate || user.postsTodayDate < todayStart;
+  const data: Prisma.UserUpdateManyMutationInput = {
+    postsTodayCount: isNewDay ? 1 : { increment: 1 },
+    postsTodayDate: todayStart,
+    totalPostsMade: { increment: 1 },
+  };
+
+  if (status.mode === 'PRO') {
+    data.proBudgetRemaining = { decrement: 1 };
+  } else if (status.mode === 'CREDIT') {
+    data.creditsRemaining = { decrement: 1 };
+  }
+
+  const updated = await tx.user.updateMany({
+    where: {
+      id: user.id,
+      tier: user.tier,
+      proExpiresAt: user.proExpiresAt,
+      proBudgetRemaining: user.proBudgetRemaining,
+      dailyPassExpiresAt: user.dailyPassExpiresAt,
+      creditsRemaining: user.creditsRemaining,
+      postsTodayCount: user.postsTodayCount,
+      postsTodayDate: user.postsTodayDate,
+    },
+    data,
+  });
+
+  if (updated.count !== 1) {
+    throw new ConflictException('Posting status changed. Please try again.');
+  }
+
   return status;
 }

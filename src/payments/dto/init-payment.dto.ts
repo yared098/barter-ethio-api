@@ -6,7 +6,9 @@ export class InitPaymentDto {
     'credit_100',
     'credit_500',
     'credit_1000',
+    'pro_15d',
     'monthly_pro',
+    'pro_6mo',
     'yearly_pro',
   ])
   plan!: string;

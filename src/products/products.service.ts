@@ -4,7 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { getEffectiveTier, tierLimits } from '../common/helpers/tier';
+import { tierLimits } from '../common/helpers/tier';
+import { reservePostingQuota } from '../common/helpers/posting-limits';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
@@ -48,21 +49,6 @@ export class ProductsService {
   }
 
   async create(ownerId: string, dto: CreateProductDto) {
-    // 1. Tier gate
-    const tier = await getEffectiveTier(this.prisma, ownerId);
-    const limits = tierLimits(tier);
-    const activeCount = await this.prisma.product.count({
-      where: { ownerId, status: 'AVAILABLE' },
-    });
-    if (activeCount >= limits.maxActiveProducts) {
-      throw new ForbiddenException({
-        code: 'FREE_TIER_POST_LIMIT',
-        message: `Free users can list up to ${limits.maxActiveProducts} active product(s). Upgrade to PRO for unlimited.`,
-        tier,
-        upgradeUrl: '/billing/upgrade',
-      });
-    }
-
     // 2. Validate categories exist
     const allCatIds = [dto.categoryId, ...dto.wants.map(w => w.categoryId)];
     const found = await this.prisma.category.findMany({
@@ -73,26 +59,42 @@ export class ProductsService {
       throw new NotFoundException('One or more categories do not exist');
     }
 
-    // 3. Create product + wants in one transaction
-    return this.prisma.product.create({
-      data: {
-        title: dto.title,
-        description: dto.description,
-        images: dto.images ?? [],
-        condition: dto.condition,
-        estimatedValue: dto.estimatedValue,
-        categoryId: dto.categoryId,
-        ownerId,
-        wants: {
-          create: dto.wants.map(w => ({
-            categoryId: w.categoryId,
-            keywords: w.keywords,
-            minValue: w.minValue,
-            maxValue: w.maxValue,
-          })),
+    // 3. Reserve the plan allowance and create the product atomically.
+    return this.prisma.$transaction(async (tx) => {
+      const postingStatus = await reservePostingQuota(tx, ownerId);
+      const limits = tierLimits(postingStatus.mode);
+      const activeCount = await tx.product.count({
+        where: { ownerId, status: 'AVAILABLE' },
+      });
+      if (activeCount >= limits.maxActiveProducts) {
+        throw new ForbiddenException({
+          code: 'FREE_TIER_POST_LIMIT',
+          message: `Free users can list up to ${limits.maxActiveProducts} active product(s). Upgrade to PRO for unlimited.`,
+          tier: postingStatus.mode,
+          upgradeUrl: '/billing/upgrade',
+        });
+      }
+
+      return tx.product.create({
+        data: {
+          title: dto.title,
+          description: dto.description,
+          images: dto.images ?? [],
+          condition: dto.condition,
+          estimatedValue: dto.estimatedValue,
+          categoryId: dto.categoryId,
+          ownerId,
+          wants: {
+            create: dto.wants.map(w => ({
+              categoryId: w.categoryId,
+              keywords: w.keywords,
+              minValue: w.minValue,
+              maxValue: w.maxValue,
+            })),
+          },
         },
-      },
-      include: INCLUDE,
+        include: INCLUDE,
+      });
     });
   }
 

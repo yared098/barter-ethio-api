@@ -28,6 +28,11 @@ export class UsersController {
     return this.users.getMe(userId);
   }
 
+  @Get('me/posting-status')
+  getPostingStatus(@CurrentUser('id') userId: string) {
+    return this.users.getPostingStatus(userId);
+  }
+
   @Patch('me')
   updateMe(@CurrentUser('id') userId: string, @Body() dto: UpdateProfileDto) {
     return this.users.updateMe(userId, dto);

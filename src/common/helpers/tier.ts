@@ -33,13 +33,17 @@ export async function getEffectiveTier(
   const now = new Date();
   const credits = user.creditsRemaining ?? 0;
 
-  // ── 1. PRO — only if expiry in future AND budget > 0 ──
-  if (user.tier === 'PRO' && user.proExpiresAt && user.proExpiresAt > now) {
+  // ── 1. PRO — only if expiry in future AND budget remains ──
+  if (
+    user.proExpiresAt &&
+    user.proExpiresAt > now &&
+    (user.proBudgetRemaining ?? 0) > 0
+  ) {
     return 'PRO';
   }
 
   // ── 2. DAILY — only if expiry in future ──
-  if (user.tier === 'DAILY' && user.dailyPassExpiresAt && user.dailyPassExpiresAt > now) {
+  if (user.dailyPassExpiresAt && user.dailyPassExpiresAt > now) {
     return 'DAILY';
   }
 

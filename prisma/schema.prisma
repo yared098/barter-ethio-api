@@ -24,7 +24,7 @@ model User {
   // ── Tier state ─────────────────────────────────────────
   tier               Tier      @default(FREE)
   proExpiresAt       DateTime? // when PRO ends
-  proBudgetRemaining Int? // posts left in PRO window (60 or 720)
+  proBudgetRemaining Int? // posts left in the active PRO plan
   dailyPassExpiresAt DateTime? // when daily pass ends (today midnight)
   creditsRemaining   Int       @default(0) // from credit packs
 

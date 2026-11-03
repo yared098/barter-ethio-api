@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { getEffectiveTier } from '../common/helpers/tier';
+import { computePostingStatus } from '../common/helpers/posting-limits';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateTierDto } from './dto/update-tier.dto';
@@ -57,6 +58,23 @@ export class UsersService {
         !!user.proExpiresAt &&
         user.proExpiresAt < new Date(),
     };
+  }
+
+  async getPostingStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        tier: true,
+        proExpiresAt: true,
+        proBudgetRemaining: true,
+        dailyPassExpiresAt: true,
+        creditsRemaining: true,
+        postsTodayCount: true,
+        postsTodayDate: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return computePostingStatus(user);
   }
 
   async updateMe(userId: string, dto: UpdateProfileDto) {

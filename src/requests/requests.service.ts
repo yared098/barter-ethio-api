@@ -7,6 +7,7 @@ import {
   RequestStatus, RequestType, ResponseStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { reservePostingQuota } from '../common/helpers/posting-limits';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { UpdateRequestDto } from './dto/update-request.dto';
@@ -36,53 +37,45 @@ export class RequestsService {
       throw new BadRequestException('budgetMin cannot exceed budgetMax');
     }
 
-    // ── FREE tier limit: 1 open request at a time ──
-    const user = await this.prisma.user.findUnique({
-      where: { id: authorId },
-      select: { id: true, tier: true, proExpiresAt: true },
-    });
-    if (!user) throw new NotFoundException('User not found');
-
-    const isPro =
-      user.tier === 'PRO' &&
-      (user.proExpiresAt == null || new Date(user.proExpiresAt) > new Date());
-
-    if (!isPro) {
-      const openCount = await this.prisma.request.count({
-        where: { authorId, status: RequestStatus.OPEN },
-      });
-      if (openCount >= 1) {
-        throw new BadRequestException(
-          'FREE users can only have 1 open request at a time. ' +
-          'Close or complete your existing request, or upgrade to PRO.',
-        );
-      }
-    }
-
     // merge URL strings (JSON) + uploaded file paths (multipart)
     const images = [...(dto.images ?? []), ...uploadedImages];
 
-    const request = await this.prisma.request.create({
-      data: {
-        authorId,
-        title: dto.title,
-        description: dto.description,
-        categoryId: dto.categoryId,
-        images,                                      // ← merged
-        specifications: dto.specifications ?? undefined,
-        budgetMin: dto.budgetMin,
-        budgetMax: dto.budgetMax,
-        type: dto.type ?? RequestType.BUY,
-        location: dto.location,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
-        isLocationRestricted: dto.isLocationRestricted ?? false,  // ⭐ optional
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
-      },
-      include: {
-        author: { select: { id: true, name: true, image: true } },
-        category: true,
-      },
+    const request = await this.prisma.$transaction(async (tx) => {
+      const postingStatus = await reservePostingQuota(tx, authorId);
+      if (postingStatus.mode === 'FREE') {
+        const openCount = await tx.request.count({
+          where: { authorId, status: RequestStatus.OPEN },
+        });
+        if (openCount >= 1) {
+          throw new BadRequestException(
+            'FREE users can only have 1 open request at a time. ' +
+            'Close or complete your existing request, or upgrade to a paid plan.',
+          );
+        }
+      }
+
+      return tx.request.create({
+        data: {
+          authorId,
+          title: dto.title,
+          description: dto.description,
+          categoryId: dto.categoryId,
+          images,
+          specifications: dto.specifications ?? undefined,
+          budgetMin: dto.budgetMin,
+          budgetMax: dto.budgetMax,
+          type: dto.type ?? RequestType.BUY,
+          location: dto.location,
+          latitude: dto.latitude,
+          longitude: dto.longitude,
+          isLocationRestricted: dto.isLocationRestricted ?? false,
+          expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+        },
+        include: {
+          author: { select: { id: true, name: true, image: true } },
+          category: true,
+        },
+      });
     });
 
     this._notifyMatchingSellers(request).catch((e) =>

@@ -1,7 +1,94 @@
 # Production Deployment
 
-This guide deploys the API, PostgreSQL, and Redis with Docker Compose on an
-Ubuntu server. PM2 is not used for this deployment.
+Choose the deployment method that matches your server:
+
+- **Shared hosting with PM2 and no root access:** use the first section below.
+- **Ubuntu VPS with Docker access:** use the Docker Compose section afterward.
+
+Do not run the Docker commands on shared hosting unless the hosting provider
+explicitly gives you Docker access.
+
+## Shared hosting with PM2 (no root access)
+
+The existing PM2 app is named `barter-ethio-api` and its ecosystem config uses
+`/home/smrestpr/barter-ethio-api` as its working directory. Run these commands
+as your hosting account user, without `sudo`. They use the `.env` already on
+the server; do not copy this project's local `.env` or replace the server's
+environment file.
+
+### Deploy updates
+
+After pushing changes to GitHub, SSH into the server and run:
+
+```sh
+(
+  set -e
+  cd /home/smrestpr/barter-ethio-api
+  git pull --ff-only
+  export PNPM_CONFIG_CHILD_CONCURRENCY=1
+  export RAYON_NUM_THREADS=1
+  export TOKIO_WORKER_THREADS=1
+  export CARGO_BUILD_JOBS=1
+  export UV_THREADPOOL_SIZE=2
+  pnpm install --frozen-lockfile
+  pnpm exec prisma generate
+  pnpm exec prisma migrate deploy
+  pnpm run build
+  mkdir -p uploads
+  pm2 reload barter-ethio-api --update-env
+  pm2 status
+)
+```
+
+`pnpm install` installs the exact locked dependencies. Prisma Client is
+generated, committed database migrations are applied to the database selected
+by the server's existing `.env`, the API is compiled, and PM2 reloads the
+existing app. The `.env` file and uploaded files are not changed by `git pull`.
+The pnpm/Rust thread limits reduce parallel work for shared hosting. The
+commands run in a fail-fast subshell, so an install, migration, or build error
+stops before PM2 reloads.
+
+If an earlier install failed with `failed to spawn thread` or `Resource
+temporarily unavailable`, rerun this complete update block after the fix has
+been pushed. Do not reload PM2 after a failed install or build.
+
+If `pnpm` is not available in the hosting account's shell, enable the Node.js
+version and package-manager environment provided by the host before running
+the commands; do not install packages globally or use `sudo`.
+
+### First PM2 start only
+
+If this is a new clone and PM2 has not registered the API yet, set the
+`cwd` in `ecosystem.config.js` to the actual absolute clone path, then run:
+
+```sh
+(
+  set -e
+  cd /home/smrestpr/barter-ethio-api
+  export PNPM_CONFIG_CHILD_CONCURRENCY=1
+  export RAYON_NUM_THREADS=1
+  export TOKIO_WORKER_THREADS=1
+  export CARGO_BUILD_JOBS=1
+  export UV_THREADPOOL_SIZE=2
+  pnpm install --frozen-lockfile
+  pnpm exec prisma generate
+  pnpm exec prisma migrate deploy
+  pnpm run build
+  mkdir -p uploads
+  pm2 start ecosystem.config.js --only barter-ethio-api
+  pm2 save
+  pm2 status
+)
+```
+
+The server must already have its own `.env` with the production database URL,
+JWT secret, Google OAuth client ID, CORS origins, and any enabled integration
+settings. Do not copy `.env.production.example` or a local `.env` over it.
+
+## Docker Compose on an Ubuntu VPS
+
+This option deploys the API, PostgreSQL, and Redis with Docker Compose. It
+requires Docker permissions and is not suitable for restricted shared hosting.
 
 The production environment file is created on the server at
 `/opt/barter-ethio-api/.env.production`. Do **not** copy or upload your local

@@ -352,59 +352,63 @@ export class PaymentsService {
       return;
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: p.userId },
-    });
-    if (!user) {
-      this.log.warn(`markPaid: user ${p.userId} not found`);
-      return;
-    }
-
     const now = new Date();
-    const updates: any = {};
-
-    if (p.grantsDailyPass) {
-      updates.dailyPassExpiresAt = endOfTodayUtc();
-      if (user.tier === 'FREE') updates.tier = 'DAILY';
-    } else if (p.grantsProPosts && p.grantsProDays) {
-      const base =
-        user.proExpiresAt && user.proExpiresAt > now ? user.proExpiresAt : now;
-      const newEnd = new Date(base);
-      newEnd.setDate(newEnd.getDate() + p.grantsProDays);
-      updates.proExpiresAt = newEnd;
-      updates.proBudgetRemaining =
-        (user.proBudgetRemaining ?? 0) + p.grantsProPosts;
-      updates.tier = 'PRO';
-    } else if (p.grantsCredits) {
-      updates.creditsRemaining =
-        (user.creditsRemaining ?? 0) + p.grantsCredits;
-      if (user.tier === 'FREE') updates.tier = 'CREDIT';
+    if (!p.grantsDailyPass && !p.grantsProPosts && !p.grantsCredits) {
+      this.log.warn(`markPaid: empty updates for ${txRef} — no grants set`);
+      throw new BadRequestException(`No entitlement is configured for ${p.plan}`);
     }
 
-    if (Object.keys(updates).length === 0) {
-      this.log.warn(`markPaid: empty updates for ${txRef} — no grants set`);
-      await this.prisma.payment.update({
-        where: { txRef },
+    const granted = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.payment.updateMany({
+        where: { txRef, status: { in: ['pending', 'expired'] } },
         data: { status: 'paid', paidAt: now, rawResponse: verified as any },
       });
+      if (claimed.count !== 1) return false;
+
+      const user = await tx.user.findUnique({ where: { id: p.userId } });
+      if (!user) throw new NotFoundException(`User ${p.userId} not found`);
+
+      if (p.grantsDailyPass) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            dailyPassExpiresAt: endOfTodayUtc(),
+            ...(user.tier === 'FREE' ? { tier: 'DAILY' } : {}),
+          },
+        });
+      } else if (p.grantsProPosts && p.grantsProDays) {
+        const base =
+          user.proExpiresAt && user.proExpiresAt > now ? user.proExpiresAt : now;
+        const newEnd = new Date(base);
+        newEnd.setDate(newEnd.getDate() + p.grantsProDays);
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            proExpiresAt: newEnd,
+            proBudgetRemaining: { increment: p.grantsProPosts },
+            tier: 'PRO',
+          },
+        });
+      } else if (p.grantsCredits) {
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            creditsRemaining: { increment: p.grantsCredits },
+            ...(user.tier === 'FREE' ? { tier: 'CREDIT' } : {}),
+          },
+        });
+      }
+
+      return true;
+    });
+
+    if (!granted) {
+      this.log.log(`markPaid: ${txRef} was already processed — skipping`);
       return;
     }
 
-    await this.prisma.$transaction([
-      this.prisma.payment.update({
-        where: { txRef },
-        data: { status: 'paid', paidAt: now, rawResponse: verified as any },
-      }),
-      this.prisma.user.update({
-        where: { id: p.userId },
-        data: updates,
-      }),
-    ]);
-
     this.log.log(
-      `✅ PAID ${txRef} plan=${p.plan} user=${p.userId} updates=${JSON.stringify(
-        updates,
-      )}`,
+      `✅ PAID ${txRef} plan=${p.plan} user=${p.userId}`,
     );
 
     try {
