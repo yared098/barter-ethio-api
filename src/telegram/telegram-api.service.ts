@@ -100,7 +100,7 @@ export class TelegramApiService {
     );
   }
 
-  listRequests(token: string, page = 1, limit = 5, categoryId?: string) {
+  listRequests(token?: string, page = 1, limit = 5, categoryId?: string) {
     const qs = new URLSearchParams({
       scope: 'all',
       page: String(page),
@@ -140,5 +140,22 @@ export class TelegramApiService {
 
   createRequest(token: string, payload: any) {
     return this.request<any>('POST', '/requests', payload, token);
+  }
+
+  replyRequest(
+    token: string,
+    requestId: string,
+    payload: { message: string; viewerLat?: number; viewerLng?: number },
+  ) {
+    return this.request<any>(
+      'POST',
+      `/requests/${encodeURIComponent(requestId)}/replies`,
+      payload,
+      token,
+    );
+  }
+
+  createProduct(token: string, payload: any) {
+    return this.request<any>('POST', '/products', payload, token);
   }
 }

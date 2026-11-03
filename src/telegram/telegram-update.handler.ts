@@ -45,6 +45,10 @@ export class TelegramUpdateHandler {
       await ctx.answerCbQuery();
       return this.onPost(ctx, true);
     });
+    bot.action(/^menu:product$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      return this.onProduct(ctx, true);
+    });
     bot.action(/^menu:matches$/, async (ctx) => {
       await ctx.answerCbQuery();
       return this.onMatches(ctx, true);
@@ -81,6 +85,33 @@ export class TelegramUpdateHandler {
       await ctx.answerCbQuery();
       const id = (ctx.match as RegExpMatchArray)[1];
       return this.onRequestDetail(ctx, id);
+    });
+    bot.action(/^request:reply:(.+)$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      const session = this.session.get(ctx.chat!.id);
+      if (!session?.jwt) return this.onStart(ctx);
+      const requestId = (ctx.match as RegExpMatchArray)[1];
+      try {
+        const request = await this.api.getRequest(session.jwt, requestId);
+        const needsLocation =
+          request.latitude != null && request.longitude != null;
+        this.session.patch(ctx.chat!.id, {
+          step: needsLocation ? 'awaiting_reply_location' : 'awaiting_reply',
+          pendingRequestId: requestId,
+          pendingReplyLatitude: undefined,
+          pendingReplyLongitude: undefined,
+        });
+        if (needsLocation) {
+          return ctx.reply(
+            '📍 This request is location-limited. Share your location to continue.',
+            kb.requestLocation(),
+          );
+        }
+      } catch (e) {
+        this.log.warn(`request lookup before reply failed: ${(e as Error).message}`);
+        return ctx.reply(t(this.lang(ctx.chat!.id)).cannotReachServer);
+      }
+      return ctx.reply('💬 Type your reply to this request:');
     });
 
     // ── language ──────────────────────────────────────────
@@ -121,7 +152,40 @@ export class TelegramUpdateHandler {
       return this.showHome(ctx, true);
     });
 
+    bot.action(/^product:cat:(.+)$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      return this.onProductCategory(ctx);
+    });
+    bot.action(/^product:condition:(NEW|LIKE_NEW|GOOD|FAIR)$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      return this.onProductCondition(ctx);
+    });
+    bot.action(/^product:wanted:(.+)$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      const categoryId = (ctx.match as RegExpMatchArray)[1];
+      const categories = await this.getCategories();
+      const category = categories.find((item) => item.id === categoryId);
+      const s = this.session.get(ctx.chat!.id);
+      if (!s?.productDraft || !category) {
+        return ctx.reply('❌ Product draft or category was lost. Start again from the menu.');
+      }
+      s.productDraft.wantedCategoryId = categoryId;
+      s.productDraft.wantedCategoryName = category.name;
+      this.session.set(ctx.chat!.id, s);
+      return this.showProductConfirm(ctx, true);
+    });
+    bot.action(/^product:confirm$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      return this.onProductConfirm(ctx);
+    });
+    bot.action(/^product:cancel$/, async (ctx) => {
+      await ctx.answerCbQuery();
+      this.session.clearStep(ctx.chat!.id);
+      return this.showHome(ctx, true);
+    });
+
     // free text
+    bot.on('location', (ctx) => this.onReplyLocation(ctx));
     bot.on('text', (ctx) => this.onText(ctx));
   }
 
@@ -135,7 +199,7 @@ export class TelegramUpdateHandler {
 
     const key = String(chatId);
     const s = this.session.get(chatId);
-    if (s?.jwt) return true;
+    if (s?.jwt && this.isAccessTokenFresh(s.jwt)) return true;
 
     const inflight = this.loginInFlight.get(key);
     if (inflight) return inflight;
@@ -144,17 +208,19 @@ export class TelegramUpdateHandler {
       try {
         const resp = await this.api.telegramLookup(String(from.id));
         this.session.set(chatId, {
+          ...s,
           lang: s?.lang ?? 'en',
           jwt: resp.accessToken,
           userId: resp.user.id,
           userName:
             resp.user.name ?? resp.user.email ?? from.username ?? 'User',
-          expiresAt: 0,
         });
         return true;
       } catch (e: any) {
         const status = e?.response?.status;
-        if (status !== 401) {
+        if (status === 401) {
+          this.session.set(chatId, { lang: s?.lang ?? 'en' });
+        } else {
           this.log.warn(
             `auto-login failed for tg=${from.id}: ${(e as Error).message}`,
           );
@@ -168,6 +234,20 @@ export class TelegramUpdateHandler {
       return await promise;
     } finally {
       this.loginInFlight.delete(key);
+    }
+  }
+
+  private isAccessTokenFresh(token: string): boolean {
+    try {
+      const payload = JSON.parse(
+        Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+      ) as { exp?: unknown };
+      return (
+        typeof payload.exp === 'number' &&
+        payload.exp * 1000 > Date.now() + 30_000
+      );
+    } catch {
+      return false;
     }
   }
 
@@ -228,7 +308,6 @@ export class TelegramUpdateHandler {
     this.session.set(id, {
       lang: s?.lang ?? 'en',
       step: 'awaiting_email',
-      expiresAt: 0,
     });
 
     return ctx.reply(L.welcomeFirstTime, {
@@ -244,6 +323,7 @@ export class TelegramUpdateHandler {
         '/start — main menu\n' +
         '/browse — wanted board\n' +
         '/post — post a request\n' +
+        'Use “Post product” in the menu to list a product.\n' +
         '/matches — your matches\n' +
         '/me — account info\n' +
         '/lang — switch language',
@@ -307,6 +387,7 @@ export class TelegramUpdateHandler {
         page,
         resp.pagination?.hasMore === true,
         categoryId,
+        items.map((item: any) => ({ id: item.id, title: item.title ?? '' })),
       );
 
       const opts = { parse_mode: 'HTML' as const, ...keyboard };
@@ -360,6 +441,7 @@ export class TelegramUpdateHandler {
           requestId,
           s2?.browsePage ?? 1,
           s2?.browseCategory ?? '',
+          r.canRespond === true,
         ),
       });
     } catch (e: any) {
@@ -477,6 +559,125 @@ export class TelegramUpdateHandler {
     }
   }
 
+  private async onProduct(ctx: any, edit = false) {
+    const id = ctx.chat.id;
+    const s = this.session.get(id);
+    if (!s?.jwt) return this.onStart(ctx);
+
+    try {
+      const cats = await this.getCategories();
+      this.session.patch(id, {
+        step: undefined,
+        draft: undefined,
+        productDraft: {},
+        pendingRequestId: undefined,
+      });
+      const opts = {
+        parse_mode: 'Markdown' as const,
+        ...kb.productCategoryPicker(cats, 'product:cat'),
+      };
+      return edit
+        ? ctx.editMessageText('📂 Choose your product category:', opts)
+        : ctx.reply('📂 Choose your product category:', opts);
+    } catch (e) {
+      this.log.warn(`product category load failed: ${(e as Error).message}`);
+      return ctx.reply(t(this.lang(id)).cannotReachServer, kb.backToMenu());
+    }
+  }
+
+  private async onProductCategory(ctx: any) {
+    const id = ctx.chat.id;
+    const categoryId = (ctx.match as RegExpMatchArray)[1];
+    const cats = await this.getCategories();
+    const category = cats.find((item) => item.id === categoryId);
+    if (!category) return ctx.reply('❌ Category not found. Start again.');
+
+    const s = this.session.get(id);
+    if (!s?.jwt) return this.onStart(ctx);
+    this.session.set(id, {
+      ...s,
+      step: 'awaiting_product_title',
+      productDraft: { categoryId, categoryName: category.name },
+    });
+    return ctx.editMessageText('📝 Type your product title (3–120 characters):');
+  }
+
+  private async onProductCondition(ctx: any) {
+    const id = ctx.chat.id;
+    const s = this.session.get(id);
+    if (!s?.productDraft) return ctx.reply('❌ Product draft was lost. Start again from the menu.');
+
+    const condition = (ctx.match as RegExpMatchArray)[1] as
+      | 'NEW'
+      | 'LIKE_NEW'
+      | 'GOOD'
+      | 'FAIR';
+    s.productDraft.condition = condition;
+    s.step = 'awaiting_product_value';
+    this.session.set(id, s);
+    return ctx.reply('💰 Enter the estimated value in ETB (0–1,000,000):');
+  }
+
+  private async onProductConfirm(ctx: any) {
+    const id = ctx.chat.id;
+    const s = this.session.get(id);
+    const draft = s?.productDraft;
+    if (
+      !s?.jwt ||
+      !draft?.categoryId ||
+      !draft.title ||
+      !draft.description ||
+      !draft.condition ||
+      draft.estimatedValue == null ||
+      !draft.wantedCategoryId
+    ) {
+      this.session.clearStep(id);
+      return ctx.editMessageText('❌ Product draft is incomplete. Start again.', kb.backToMenu());
+    }
+
+    try {
+      const created = await this.api.createProduct(s.jwt, {
+        title: draft.title,
+        description: draft.description,
+        categoryId: draft.categoryId,
+        condition: draft.condition,
+        estimatedValue: draft.estimatedValue,
+        wants: [{ categoryId: draft.wantedCategoryId }],
+      });
+      this.session.clearStep(id);
+      return ctx.editMessageText(
+        `🎉 Product posted! ID: ${this.esc(created?.id ?? '—')}`,
+        { parse_mode: 'HTML', ...kb.backToMenu() },
+      );
+    } catch (e: any) {
+      const message = e?.response?.data?.message ?? e?.message ?? 'Could not post product';
+      this.log.warn(`product post failed: ${message}`);
+      this.session.clearStep(id);
+      return ctx.editMessageText(`❌ ${this.esc(Array.isArray(message) ? message.join(', ') : message)}`, {
+        parse_mode: 'HTML',
+        ...kb.backToMenu(),
+      });
+    }
+  }
+
+  private showProductConfirm(ctx: any, edit: boolean) {
+    const id = ctx.chat.id;
+    const s = this.session.get(id);
+    const draft = s?.productDraft;
+    if (!draft) return ctx.reply('❌ Product draft was lost. Start again.');
+
+    const text =
+      `✅ <b>Confirm product</b>\n\n` +
+      `📂 Category: ${this.esc(draft.categoryName ?? '—')}\n` +
+      `📝 Title: ${this.esc(draft.title ?? '—')}\n` +
+      `📄 ${this.esc(draft.description ?? '—')}\n` +
+      `🔎 Condition: ${draft.condition ?? '—'}\n` +
+      `💰 Estimated value: ${draft.estimatedValue ?? '—'} ETB\n` +
+      `🔄 Wants: ${this.esc(draft.wantedCategoryName ?? '—')}`;
+    const opts = { parse_mode: 'HTML' as const, ...kb.productConfirm() };
+    return edit ? ctx.editMessageText(text, opts) : ctx.reply(text, opts);
+  }
+
   private async onPostCategory(ctx: any) {
     const id = ctx.chat.id;
     const L = t(this.lang(id));
@@ -484,7 +685,7 @@ export class TelegramUpdateHandler {
     const cats = await this.getCategories();
     const cat = cats.find((c) => c.id === categoryId);
 
-    const s = this.session.get(id) ?? { lang: 'en' as Lang, expiresAt: 0 };
+    const s = this.session.get(id) ?? { lang: 'en' as Lang };
     this.session.set(id, {
       ...s,
       step: 'awaiting_title',
@@ -600,7 +801,6 @@ export class TelegramUpdateHandler {
         lang: s.lang,
         step: 'awaiting_password',
         pendingEmail: email,
-        expiresAt: 0,
       });
       return ctx.reply(L.askPassword, {
         parse_mode: 'Markdown',
@@ -633,7 +833,6 @@ export class TelegramUpdateHandler {
           jwt: resp.accessToken,
           userId: resp.user.id,
           userName: resp.user.name ?? resp.user.email ?? 'there',
-          expiresAt: 0,
         });
         return ctx.reply(
           L.loginOk(resp.user.name ?? resp.user.email ?? 'there'),
@@ -645,13 +844,39 @@ export class TelegramUpdateHandler {
           this.session.set(id, {
             lang: s.lang,
             step: 'awaiting_email',
-            expiresAt: 0,
           });
           return ctx.reply(L.loginFail, {
             reply_markup: { force_reply: true, selective: true },
           });
         }
         return ctx.reply(L.cannotReachServer, kb.backToMenu());
+      }
+    }
+
+    if (s.step === 'awaiting_reply') {
+      if (!text || !s.pendingRequestId || !s.jwt) {
+        this.session.clearStep(id);
+        return ctx.reply('❌ Reply could not be sent. Please open the request and try again.');
+      }
+      try {
+        await this.api.replyRequest(s.jwt, s.pendingRequestId, {
+          message: text,
+          ...(s.pendingReplyLatitude != null &&
+            s.pendingReplyLongitude != null && {
+              viewerLat: s.pendingReplyLatitude,
+              viewerLng: s.pendingReplyLongitude,
+            }),
+        });
+        this.session.clearStep(id);
+        return ctx.reply('✅ Your reply was sent.', kb.backToMenu());
+      } catch (e: any) {
+        const message = e?.response?.data?.message ?? e?.message ?? 'Could not send reply';
+        this.log.warn(`request reply failed: ${message}`);
+        this.session.clearStep(id);
+        return ctx.reply(
+          `❌ ${this.esc(Array.isArray(message) ? message.join(', ') : message)}`,
+          { parse_mode: 'HTML', ...kb.backToMenu() },
+        );
       }
     }
 
@@ -689,5 +914,57 @@ export class TelegramUpdateHandler {
       this.session.set(id, s);
       return this.showPostConfirm(ctx, false);
     }
+
+    if (s.step === 'awaiting_product_title') {
+      if (text.length < 3 || text.length > 120) {
+        return ctx.reply('❌ Title must be between 3 and 120 characters.');
+      }
+      s.productDraft = { ...(s.productDraft ?? {}), title: text };
+      s.step = 'awaiting_product_desc';
+      this.session.set(id, s);
+      return ctx.reply('📝 Type a product description (10–2,000 characters):');
+    }
+
+    if (s.step === 'awaiting_product_desc') {
+      if (text.length < 10 || text.length > 2000) {
+        return ctx.reply('❌ Description must be between 10 and 2,000 characters.');
+      }
+      s.productDraft = { ...(s.productDraft ?? {}), description: text };
+      s.step = undefined;
+      this.session.set(id, s);
+      return ctx.reply('🔎 Choose the product condition:', kb.productConditionPicker());
+    }
+
+    if (s.step === 'awaiting_product_value') {
+      const value = Number(text);
+      if (!text || !Number.isFinite(value) || value < 0 || value > 1_000_000) {
+        return ctx.reply('❌ Enter a number between 0 and 1,000,000 ETB.');
+      }
+      s.productDraft = { ...(s.productDraft ?? {}), estimatedValue: value };
+      s.step = undefined;
+      this.session.set(id, s);
+
+      const cats = await this.getCategories();
+      return ctx.reply(
+        '🔄 Choose the category you want in exchange:',
+        kb.productCategoryPicker(cats, 'product:wanted'),
+      );
+    }
+  }
+
+  private async onReplyLocation(ctx: any) {
+    const id = ctx.chat.id;
+    const session = this.session.get(id);
+    const location = ctx.message.location;
+    if (session?.step !== 'awaiting_reply_location' || !location) return;
+
+    this.session.patch(id, {
+      step: 'awaiting_reply',
+      pendingReplyLatitude: location.latitude,
+      pendingReplyLongitude: location.longitude,
+    });
+    return ctx.reply('💬 Type your reply to this request.', {
+      reply_markup: { remove_keyboard: true },
+    });
   }
 }

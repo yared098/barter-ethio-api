@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Lang } from './telegram-i18n';
 
-const TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
 export interface PostDraft {
   categoryId?: string;
   categoryName?: string;
@@ -11,6 +9,17 @@ export interface PostDraft {
   type?: 'BUY' | 'BARTER' | 'EITHER';
   budgetMin?: number;
   budgetMax?: number;
+}
+
+export interface ProductDraft {
+  categoryId?: string;
+  categoryName?: string;
+  title?: string;
+  description?: string;
+  condition?: 'NEW' | 'LIKE_NEW' | 'GOOD' | 'FAIR';
+  estimatedValue?: number;
+  wantedCategoryId?: string;
+  wantedCategoryName?: string;
 }
 
 export interface TelegramSession {
@@ -23,13 +32,21 @@ export interface TelegramSession {
     | 'awaiting_password'
     | 'awaiting_title'
     | 'awaiting_desc'
-    | 'awaiting_budget';
+    | 'awaiting_budget'
+    | 'awaiting_reply'
+    | 'awaiting_reply_location'
+    | 'awaiting_product_title'
+    | 'awaiting_product_desc'
+    | 'awaiting_product_value';
   pendingEmail?: string;
   draft?: PostDraft;
+  productDraft?: ProductDraft;
+  pendingRequestId?: string;
+  pendingReplyLatitude?: number;
+  pendingReplyLongitude?: number;
   // browse state
   browsePage?: number;
   browseCategory?: string;
-  expiresAt: number;
 }
 
 @Injectable()
@@ -41,23 +58,15 @@ export class TelegramSessionService {
 
   get(chatId: number | string): TelegramSession | null {
     const s = this.store.get(this.key(chatId));
-    if (!s) return null;
-    if (s.expiresAt < Date.now()) {
-      this.store.delete(this.key(chatId));
-      return null;
-    }
-    return s;
+    return s ?? null;
   }
 
   set(chatId: number | string, s: TelegramSession) {
-    this.store.set(this.key(chatId), {
-      ...s,
-      expiresAt: Date.now() + TTL_MS,
-    });
+    this.store.set(this.key(chatId), s);
   }
 
   patch(chatId: number | string, p: Partial<TelegramSession>) {
-    const cur = this.get(chatId) ?? { lang: 'en' as Lang, expiresAt: 0 };
+    const cur = this.get(chatId) ?? { lang: 'en' as Lang };
     this.set(chatId, { ...cur, ...p });
   }
 
@@ -67,6 +76,10 @@ export class TelegramSessionService {
     delete cur.step;
     delete cur.pendingEmail;
     delete cur.draft;
+    delete cur.productDraft;
+    delete cur.pendingRequestId;
+    delete cur.pendingReplyLatitude;
+    delete cur.pendingReplyLongitude;
     this.set(chatId, cur);
   }
 

@@ -18,13 +18,7 @@ export class TokenService {
   ) {}
 
   async issue(userId: string, role: string): Promise<TokenPair> {
-    const accessToken = await this.jwt.signAsync(
-      { sub: userId, role },
-      {
-        secret: this.config.get<string>('JWT_ACCESS_SECRET'),
-        expiresIn: this.config.get<string>('JWT_ACCESS_TTL', '15m'),
-      },
-    );
+    const accessToken = await this.issueAccessToken(userId, role);
 
     const refreshToken = randomBytes(48).toString('hex');
     const days = Number(this.config.get('JWT_REFRESH_TTL_DAYS', 30));
@@ -38,6 +32,16 @@ export class TokenService {
     });
 
     return { accessToken, refreshToken };
+  }
+
+  issueAccessToken(userId: string, role: string): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: userId, role },
+      {
+        secret: this.config.get<string>('JWT_ACCESS_SECRET'),
+        expiresIn: this.config.get<string>('JWT_ACCESS_TTL', '15m'),
+      },
+    );
   }
 
   async rotate(refreshToken: string): Promise<TokenPair> {

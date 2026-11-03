@@ -45,6 +45,3 @@ firebase-service-account*.json
 # Docs
 *.md
 !README.md
-
-# Workspace files (not needed in Docker build context)
-pnpm-workspace.yaml

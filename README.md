@@ -47,17 +47,24 @@ The platform is **free** with a **PRO tier** that unlocks unlimited postings and
 - ✅ Google OAuth login (ID token verification)
 - ✅ Email + password login (fallback / testing)
 - ✅ Short-lived JWT access tokens (15m) + rotating refresh tokens (30d)
+- ✅ Telegram account linking with automatic access-token renewal
 - ✅ Refresh token rotation & revocation
 - ✅ Logout (revoke all sessions)
 - ✅ Role-based access control (`USER`, `ADMIN`)
 
 ### Products
 - ✅ Create product listings with images
+- ✅ Telegram bot product posting
 - ✅ **Multiple wanted categories per product** ("I'll trade for Audio OR Clothing")
 - ✅ Free-text keyword hints ("Samsung S24 Ultra", "Nike size 42")
 - ✅ Optional value range (`minValue` / `maxValue`)
 - ✅ Browse with filters: category, wanted category, search, status, mine
 - ✅ Owner-only update/delete (only while `AVAILABLE`)
+
+### Requests
+- ✅ Browse and view open requests with `GET /requests` and `GET /requests/:id` without signing in
+- ✅ Authenticated request creation, editing, cancellation, and replies
+- ✅ Telegram bot request browsing and replies
 
 ### Matching
 - ✅ Bidirectional scoring (do they also want what I have?)
@@ -86,4 +93,9 @@ The platform is **free** with a **PRO tier** that unlocks unlimited postings and
 
 ---
 
-## Architecture
+## Production Deployment
+
+For server setup, environment-file creation, Docker Compose startup, migrations,
+and future updates, follow [deployment.md](./deployment.md). The server uses
+its own ignored `.env.production`; never copy a developer or production
+environment file into Git.

@@ -1,6 +1,6 @@
 // src/requests/requests.service.ts
 import {
-  BadRequestException, ForbiddenException, Injectable, Logger,
+  BadRequestException, ForbiddenException, Injectable, Logger, UnauthorizedException,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -79,7 +79,10 @@ export class RequestsService {
         isLocationRestricted: dto.isLocationRestricted ?? false,  // ⭐ optional
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
-      include: { author: true, category: true },
+      include: {
+        author: { select: { id: true, name: true, image: true } },
+        category: true,
+      },
     });
 
     this._notifyMatchingSellers(request).catch((e) =>
@@ -118,14 +121,18 @@ export class RequestsService {
   // ─────────────────────────────────────────────
   //  LIST  (public feed + mine + replies)
   // ─────────────────────────────────────────────
-  async list(userId: string, q: ListRequestsQueryDto) {
+  async list(userId: string | undefined, q: ListRequestsQueryDto) {
     const where: any = {};
+
+    if (!userId && (q.scope === 'mine' || q.scope === 'replies')) {
+      throw new UnauthorizedException('Sign in to view your requests or replies');
+    }
 
     if (q.scope === 'mine') where.authorId = userId;
     else if (q.scope === 'replies') where.responses = { some: { responderId: userId } };
     else where.status = RequestStatus.OPEN;
 
-    if (q.status)     where.status     = q.status;
+    if (userId && q.status) where.status = q.status;
     if (q.type)       where.type       = q.type;
     if (q.categoryId) where.categoryId = q.categoryId;
 
@@ -156,7 +163,7 @@ export class RequestsService {
           longitude: { gte: viewerLng - lngDelta, lte: viewerLng + lngDelta },
         },
         { latitude: null, longitude: null },
-        { authorId: userId },
+        ...(userId ? [{ authorId: userId }] : []),
       ];
 
       if (locationName) {
@@ -171,7 +178,7 @@ export class RequestsService {
       geoOr = [
         { location: { equals: locationName, mode: 'insensitive' } },
         { location: null },
-        { authorId: userId },
+        ...(userId ? [{ authorId: userId }] : []),
       ];
     }
 
@@ -188,7 +195,7 @@ export class RequestsService {
         where,
         orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
         include: {
-          author: true,
+          author: { select: { id: true, name: true, image: true } },
           category: true,
           _count: { select: { responses: true } },
         },
@@ -199,7 +206,13 @@ export class RequestsService {
     ]);
 
     return {
-      items,
+      items: userId
+        ? items
+        : items.map((request) => ({
+            ...request,
+            latitude: null,
+            longitude: null,
+          })),
       pagination: {
         page, limit, total,
         totalPages: Math.ceil(total / limit),
@@ -222,15 +235,21 @@ export class RequestsService {
     const r = await this.prisma.request.findUnique({
       where: { id },
       include: {
-        author: true,
+        author: { select: { id: true, name: true, image: true } },
         category: true,
         responses: {
-          include: { responder: true, product: true },
+          include: {
+            responder: { select: { id: true, name: true, image: true } },
+            product: true,
+          },
           orderBy: { createdAt: 'asc' },
         },
       },
     });
     if (!r) throw new NotFoundException('Request not found');
+    if (!viewerId && r.status !== RequestStatus.OPEN) {
+      throw new NotFoundException('Request not found');
+    }
 
     const isAuthor = !!viewerId && r.authorId === viewerId;
 
@@ -258,7 +277,15 @@ export class RequestsService {
       }
     }
 
-    return { ...r, responses, isAuthor, canRespond, canAccept, myOfferId };
+    return {
+      ...r,
+      ...(viewerId ? {} : { latitude: null, longitude: null }),
+      responses,
+      isAuthor,
+      canRespond,
+      canAccept,
+      myOfferId,
+    };
   }
 
   // ─────────────────────────────────────────────
@@ -372,7 +399,10 @@ export class RequestsService {
         message: dto.message,
         offeredPrice: dto.offeredPrice,
       },
-      include: { responder: true, product: true },
+      include: {
+        responder: { select: { id: true, name: true, image: true } },
+        product: true,
+      },
     });
 
     this.notifications

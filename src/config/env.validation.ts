@@ -23,6 +23,8 @@ export const envValidationSchema = Joi.object({
   // Must match AppConfig.googleWebClientId in the Flutter app.
   GOOGLE_CLIENT_ID: Joi.string().required(),
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
+  TELEGRAM_BOT_TOKEN: Joi.string().allow('').optional(),
+  TELEGRAM_INTERNAL_SECRET: Joi.string().allow('').optional(),
 
   // ─── Firebase Admin (push notifications) ───
   FIREBASE_PROJECT_ID: Joi.string().allow('').optional(),

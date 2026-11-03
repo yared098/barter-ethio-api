@@ -26,6 +26,7 @@ import { ReplyRequestDto } from './dto/reply-request.dto';
 import { ListRequestsQueryDto } from './dto/list-requests-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { Public } from '../common/decorators/public.decorator';
 
 // ── same MIME/EXT policy as UploadsController ───────────────
 const ALLOWED_MIME = [
@@ -99,15 +100,17 @@ export class RequestsController {
   }
 
   // ── LIST ──
+  @Public()
   @Get()
-  list(@CurrentUser() u, @Query() q: ListRequestsQueryDto) {
-    return this.requests.list(u.id, q);
+  list(@CurrentUser('id') userId: string | undefined, @Query() q: ListRequestsQueryDto) {
+    return this.requests.list(userId, q);
   }
 
   // ── DETAIL ──
+  @Public()
   @Get(':id')
-  detail(@CurrentUser() u, @Param('id') id: string) {
-    return this.requests.getDetail(id, u.id);
+  detail(@CurrentUser('id') userId: string | undefined, @Param('id') id: string) {
+    return this.requests.getDetail(id, userId);
   }
 
   // ── UPDATE ──

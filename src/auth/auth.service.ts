@@ -197,8 +197,8 @@ export class AuthService {
       throw new UnauthorizedException('Account is disabled');
     }
 
-    const tokens = await this.tokens.issue(user.id, user.role);
-    return { user: this.sanitize(user), ...tokens };
+    const accessToken = await this.tokens.issueAccessToken(user.id, user.role);
+    return { user: this.sanitize(user), accessToken };
   }
 
   // ⭐ first-time only — validates password, links telegram to that user
@@ -253,7 +253,7 @@ export class AuthService {
       },
     });
 
-    const tokens = await this.tokens.issue(updated.id, updated.role);
-    return { user: this.sanitize(updated), ...tokens };
+    const accessToken = await this.tokens.issueAccessToken(updated.id, updated.role);
+    return { user: this.sanitize(updated), accessToken };
   }
 }
