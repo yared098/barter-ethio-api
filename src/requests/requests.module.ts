@@ -1,4 +1,3 @@
-// src/requests/requests.module.ts
 import { Module } from '@nestjs/common';
 import { RequestsController } from './requests.controller';
 import { RequestsService } from './requests.service';
