@@ -87,6 +87,14 @@ export class TelegramApiService {
     );
   }
 
+  telegramLogout(telegramId: string) {
+    return this.request<{ ok: boolean; unlinked: boolean }>(
+      'POST',
+      '/auth/telegram/logout',
+      { telegramId },
+    );
+  }
+
   telegramLink(p: {
     email: string;
     password: string;

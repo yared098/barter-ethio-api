@@ -90,6 +90,20 @@ export class AuthController {
     return this.auth.telegramLookup(dto.telegramId);
   }
 
+  @Public()
+  @Post('telegram/logout')
+  @HttpCode(HttpStatus.OK)
+  telegramLogout(
+    @Body() dto: TelegramLookupDto,
+    @Headers('x-bot-secret') botSecret: string,
+  ) {
+    const expected = this.config.get<string>('TELEGRAM_INTERNAL_SECRET');
+    if (!expected || botSecret !== expected) {
+      throw new UnauthorizedException('Invalid bot secret');
+    }
+    return this.auth.telegramLogout(dto.telegramId);
+  }
+
   // ⭐ bot link — first-time only, requires email + password
   @Public()
   @Post('telegram/link')

@@ -393,6 +393,33 @@ export class AuthService {
     return { user: this.sanitize(user), accessToken };
   }
 
+  async telegramLogout(telegramId: string) {
+    const now = new Date();
+    const user = await this.prisma.user.findUnique({
+      where: { telegramChatId: telegramId },
+      select: { id: true },
+    });
+    if (!user) return { ok: true, unlinked: false };
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.telegramLinkCode.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: now },
+      });
+
+      const result = await tx.user.updateMany({
+        where: { id: user.id, telegramChatId: telegramId },
+        data: {
+          telegramChatId: null,
+          telegramUsername: null,
+          telegramLinkedAt: null,
+        },
+      });
+
+      return { ok: true, unlinked: result.count === 1 };
+    });
+  }
+
   // ⭐ first-time only — validates password, links telegram to that user
   async telegramLink(dto: {
     email: string;

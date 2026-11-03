@@ -279,16 +279,29 @@ export class TelegramUpdateHandler {
   }
 
   private async onLogout(ctx: any) {
+    if (ctx.chat?.type !== 'private' || !ctx.from) {
+      return ctx.reply('Please use /logout in your private chat with this bot.');
+    }
     const id = ctx.chat.id;
     const previous = this.session.get(id);
     this.session.set(id, {
       lang: previous?.lang ?? 'en',
       botLoggedOut: true,
     });
-    return ctx.reply(
-      'You are logged out of the bot. To reconnect, sign in to the same Barter Ethio account on the website, generate a Telegram link code from your dashboard, and send `/link CODE` here. Your account remains linked until you reconnect.',
-      { parse_mode: 'Markdown' },
-    );
+    try {
+      const result = await this.api.telegramLogout(String(ctx.from.id));
+      const message = result.unlinked
+        ? 'You are logged out, and your Telegram account has been unlinked from Barter Ethio. Your Barter user account, products, requests, and chats are not deleted. To reconnect, sign in on the website, create a fresh Telegram link code, and send `/link CODE` here.'
+        : 'You are logged out of the bot. No linked Telegram account was found in the database. If you still see a link conflict, restart the bot after deploying the latest API update, then try /logout again.';
+      return ctx.reply(message, { parse_mode: 'Markdown' });
+    } catch (error) {
+      this.log.error(
+        `Telegram unlink failed for current user: ${(error as Error).message}`,
+      );
+      return ctx.reply(
+        'Your bot session was cleared, but the account link could not be removed from the database. Please retry /logout after the API is available; do not generate a new link code yet.',
+      );
+    }
   }
 
   private async delMsg(ctx: any, msgId: number) {
@@ -387,6 +400,7 @@ export class TelegramUpdateHandler {
       const previous = this.session.get(ctx.chat.id);
       this.session.set(ctx.chat.id, {
         lang: previous?.lang ?? 'en',
+        botLoggedOut: false,
         jwt: result.accessToken,
         userId: result.user.id,
         userName:
