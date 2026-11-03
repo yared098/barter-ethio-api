@@ -150,7 +150,7 @@ export const kb = {
       ],
     ]),
 
-  requestLocation: () =>
+  requestLocation: (): ReturnType<typeof Markup.keyboard> =>
     Markup.keyboard([
       [Markup.button.locationRequest('📍 Share my location')],
     ])
