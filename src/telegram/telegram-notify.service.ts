@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from './telegram.service';
 
@@ -16,6 +17,7 @@ export class TelegramNotifyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly telegram: TelegramService,
+    private readonly config: ConfigService,
   ) {}
 
   async sendToUser(userId: string, msg: TelegramMessage) {
@@ -30,17 +32,29 @@ export class TelegramNotifyService {
 
     const text = `🔔 <b>${this.esc(msg.title)}</b>\n\n${this.esc(msg.body)}`;
 
-    // ⭐ ONLY add a button if the URL is a scheme Telegram accepts.
-    //    Custom schemes like `barterethio://` cause a 400 Bad Request.
-    const isSafe =
+    // Convert the app's internal offer link into a Telegram Web App button.
+    const offerId = msg.actionUrl?.match(
+      /^barterethio:\/\/offer\/([A-Za-z0-9_-]+)$/,
+    )?.[1];
+    const webAppUrl = this.chatWebAppUrl(offerId);
+    const isSafeUrl =
       !!msg.actionUrl &&
       /^(https?:\/\/|tg:\/\/)/i.test(msg.actionUrl) &&
       !!msg.actionLabel;
-
-    const replyMarkup = isSafe
-      ? {
-          inline_keyboard: [[{ text: msg.actionLabel!, url: msg.actionUrl! }]],
-        }
+    const replyMarkup = msg.actionLabel
+      ? webAppUrl
+        ? {
+            inline_keyboard: [
+              [{ text: msg.actionLabel, web_app: { url: webAppUrl } }],
+            ],
+          }
+        : isSafeUrl
+          ? {
+              inline_keyboard: [
+                [{ text: msg.actionLabel, url: msg.actionUrl! }],
+              ],
+            }
+          : undefined
       : undefined;
 
     try {
@@ -60,5 +74,24 @@ export class TelegramNotifyService {
     return (s ?? '').replace(/[<>&]/g, (c) =>
       c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;',
     );
+  }
+
+  private chatWebAppUrl(offerId?: string): string | undefined {
+    if (!offerId) return undefined;
+    const configuredUrl = this.config.get<string>('TELEGRAM_WEB_APP_URL');
+    if (!configuredUrl) return undefined;
+
+    const base = new URL(configuredUrl);
+    let path = base.pathname.replace(/\/+$/, '');
+    if (/\/chat\/[^/]+$/.test(path)) {
+      path = path.slice(0, path.lastIndexOf('/'));
+    }
+    base.pathname = `${path}/${encodeURIComponent(offerId)}`.replace(
+      /\/{2,}/g,
+      '/',
+    );
+    base.search = '';
+    base.hash = '';
+    return base.toString();
   }
 }

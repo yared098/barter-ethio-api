@@ -8,6 +8,27 @@ Choose the deployment method that matches your server:
 Do not run the Docker commands on shared hosting unless the hosting provider
 explicitly gives you Docker access.
 
+## Telegram chat Web App
+
+The chat screen is part of the separate `barter_ethio_web` Next.js repository;
+deploy that repository to Netlify as well as deploying this API. Keep using the
+existing HTTPS site. For the supplied site URL, set the API server's existing
+`.env` value to:
+
+```env
+TELEGRAM_WEB_APP_URL=https://warm-cobbler-1586ce.netlify.app/chat
+```
+
+This is the chat route base, without a specific offer ID. When a user receives
+an offer or message, the bot appends that offer's ID and opens the chat inside
+Telegram. Make sure the Netlify frontend's server-side `API_URL` points to the
+deployed API. In BotFather, configure the bot's Mini App/domain to use
+`warm-cobbler-1586ce.netlify.app`.
+
+The Web App validates Telegram's signed launch data on the API and only permits
+the Telegram account already linked to a Barter user. Both chat participants
+can open the same offer chat; the normal offer authorization checks still apply.
+
 ## Shared hosting with PM2 (no root access)
 
 The existing PM2 app is named `barter-ethio-api` and its ecosystem config uses
@@ -84,6 +105,14 @@ If this is a new clone and PM2 has not registered the API yet, set the
 The server must already have its own `.env` with the production database URL,
 JWT secret, Google OAuth client ID, CORS origins, and any enabled integration
 settings. Do not copy `.env.production.example` or a local `.env` over it.
+
+For Telegram chat buttons, set `TELEGRAM_WEB_APP_URL` in the server's existing
+`.env` to the HTTPS chat route base, for example
+`https://warm-cobbler-1586ce.netlify.app/chat` (do not include an offer ID).
+Configure the same site domain for the bot's Mini App in BotFather. The API
+will add each offer ID to that base URL. Telegram polling must run in only one
+process for this bot token; a `409 Conflict` means another process is already
+polling, so stop the duplicate process rather than retrying it.
 
 ## Docker Compose on an Ubuntu VPS
 

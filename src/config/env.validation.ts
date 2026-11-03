@@ -25,6 +25,10 @@ export const envValidationSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').optional(),
   TELEGRAM_BOT_TOKEN: Joi.string().allow('').optional(),
   TELEGRAM_INTERNAL_SECRET: Joi.string().allow('').optional(),
+  TELEGRAM_WEB_APP_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .allow('')
+    .optional(),
 
   // ─── Firebase Admin (push notifications) ───
   FIREBASE_PROJECT_ID: Joi.string().allow('').optional(),

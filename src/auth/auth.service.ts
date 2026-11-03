@@ -3,6 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -15,6 +16,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly google: GoogleService,
     private readonly tokens: TokenService,
+    private readonly config: ConfigService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════
@@ -158,6 +160,77 @@ export class AuthService {
     }
 
     if (!user.isActive) throw new UnauthorizedException('Account is disabled');
+
+    const tokens = await this.tokens.issue(user.id, user.role);
+    return { user: this.sanitize(user), ...tokens };
+  }
+
+  async telegramWebAppLogin(initData: string) {
+    const botToken = this.config.get<string>('TELEGRAM_BOT_TOKEN')?.trim();
+    if (!botToken) {
+      throw new UnauthorizedException('Telegram Web App login is unavailable');
+    }
+
+    const params = new URLSearchParams(initData);
+    const receivedHash = params.get('hash');
+    if (!receivedHash || !/^[a-f0-9]{64}$/i.test(receivedHash)) {
+      throw new UnauthorizedException('Invalid Telegram Web App data');
+    }
+
+    const dataCheckString = [...params.entries()]
+      .filter(([key]) => key !== 'hash')
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    const secretKey = crypto
+      .createHmac('sha256', 'WebAppData')
+      .update(botToken)
+      .digest();
+    const expectedHash = crypto
+      .createHmac('sha256', secretKey)
+      .update(dataCheckString)
+      .digest();
+    const suppliedHash = Buffer.from(receivedHash, 'hex');
+
+    if (
+      suppliedHash.length !== expectedHash.length ||
+      !crypto.timingSafeEqual(suppliedHash, expectedHash)
+    ) {
+      throw new UnauthorizedException('Invalid Telegram Web App signature');
+    }
+
+    const authDate = Number(params.get('auth_date'));
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (
+      !Number.isSafeInteger(authDate) ||
+      authDate > nowSeconds + 60 ||
+      nowSeconds - authDate > 60 * 60
+    ) {
+      throw new UnauthorizedException('Telegram Web App data has expired');
+    }
+
+    let telegramUser: { id?: number | string };
+    try {
+      telegramUser = JSON.parse(params.get('user') ?? '');
+    } catch {
+      throw new UnauthorizedException('Invalid Telegram user data');
+    }
+    if (
+      (typeof telegramUser.id !== 'number' &&
+        typeof telegramUser.id !== 'string') ||
+      !/^\d+$/.test(String(telegramUser.id))
+    ) {
+      throw new UnauthorizedException('Invalid Telegram user data');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { telegramChatId: String(telegramUser.id) },
+    });
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException(
+        'Link your Telegram account to Barter Ethio before opening chats',
+      );
+    }
 
     const tokens = await this.tokens.issue(user.id, user.role);
     return { user: this.sanitize(user), ...tokens };

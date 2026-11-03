@@ -20,6 +20,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { TelegramLookupDto } from 'src/telegram/dto/telegram-lookup.dto';
 import { TelegramLinkDto } from 'src/telegram/dto/telegram-link.dto';
+import { TelegramWebAppLoginDto } from './dto/telegram-webapp-login.dto';
 // import { TelegramLinkDto } from './dto/telegram-link.dto';
 // import { TelegramLookupDto } from './dto/telegram-lookup.dto';
 
@@ -58,6 +59,13 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   googleCode(@Body() dto: { code: string; redirectUri: string }) {
     return this.auth.googleCodeLogin(dto.code, dto.redirectUri);
+  }
+
+  @Public()
+  @Post('telegram/webapp')
+  @HttpCode(HttpStatus.OK)
+  telegramWebApp(@Body() dto: TelegramWebAppLoginDto) {
+    return this.auth.telegramWebAppLogin(dto.initData);
   }
 
   // ⭐ passwordless telegram — guarded by shared secret

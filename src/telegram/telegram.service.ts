@@ -47,7 +47,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   async handleUpdate(update: any) {
-    if (this.bot) await this.bot.handleUpdate(update);
+    if (this.bot) {
+      this.retries = 0;
+      await this.bot.handleUpdate(update);
+    }
   }
 
   private _scheduleRetry() {
@@ -126,31 +129,47 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     const agent = this._buildAgent();
 
-    this.bot = new Telegraf(token, {
+    const bot = new Telegraf(token, {
       handlerTimeout: 30_000,
       telegram: { agent },
     });
+    this.bot = bot;
 
-    this.handler.register(this.bot);
-    this.bot.catch((err, ctx) => {
+    bot.use(async (_ctx, next) => {
+      this.retries = 0;
+      return next();
+    });
+    this.handler.register(bot);
+    bot.catch((err, ctx) => {
       this.log.error(
         `🤖 Bot handler error on ${ctx.updateType}: ${(err as Error).message}`,
       );
     });
 
     this.log.log('🤖 Launching Telegram bot (polling)…');
-    this.bot
-      .launch({ dropPendingUpdates: false })
-      .catch((e: any) => {
-        const code =
-          e?.cause?.code || e?.code || e?.errno || e?.message || 'unknown';
-        this.log.error(
-          `🤖 bot launch crashed (${code}). Fix: set HTTPS_PROXY or enable webhook mode.`,
-        );
-        this._scheduleRetry();
-      });
+    void bot.launch({ dropPendingUpdates: false }).catch((e: any) => {
+      if (this.bot === bot) this.bot = undefined;
 
-    this.log.log('🤖 Telegram bot (polling) started');
-    this.retries = 0;
+      const telegramCode = e?.response?.error_code ?? e?.code;
+      const description =
+        e?.response?.description || e?.description || e?.message || 'unknown';
+      if (
+        Number(telegramCode) === 409 ||
+        /409|conflict:.*getupdates/i.test(String(description))
+      ) {
+        this.log.error(
+          `🤖 Telegram polling conflict: ${description}. Stop other processes using this bot token; only one polling instance can run.`,
+        );
+        try {
+          bot.stop('polling-conflict');
+        } catch {
+          // Telegraf may already have stopped after the failed launch.
+        }
+        return;
+      }
+
+      this.log.error(`🤖 Telegram bot launch failed: ${description}`);
+      this._scheduleRetry();
+    });
   }
 }

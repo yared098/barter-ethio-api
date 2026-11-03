@@ -156,7 +156,7 @@ export class NotificationsService {
         type: 'offer.received',
         offerId,
         screen: 'offer-detail',
-        // ⭐ optional deep link — only works if your app registers the scheme
+        // Telegram turns this into a signed Web App button when configured.
         actionUrl: `barterethio://offer/${offerId}`,
         actionLabel: '💬 Open offer',
       },
@@ -222,8 +222,6 @@ export class NotificationsService {
         screen: 'offer-chat',
         // for mobile app (ignored by Telegram)
         actionUrl: `barterethio://offer/${offerId}`,
-        // for Telegram — falls back to a web link if app scheme exists
-        webUrl: `https://api.smrestaurant.com/api/v1/offers/${offerId}`,
         actionLabel: '💬 Open offer',
       },
     });
