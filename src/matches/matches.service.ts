@@ -403,6 +403,7 @@ if (tier !== 'FREE') {
     // Strip sensitive info — no title, no owner name, no description
     const teaserMatches = teaserSource.map((m) => ({
       id: m.product.id,
+      matchedFromId: m.matchedFrom.id,
       // Only the first image, for a blurred preview
       image: (m.product.images as string[])?.[0] ?? null,
       // Rounded score (doesn't expose exact ranking)
