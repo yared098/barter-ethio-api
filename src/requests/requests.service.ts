@@ -153,9 +153,10 @@ export class RequestsService {
     }
 
     const hasGeo = q.lat != null && q.lng != null;
+    const publicFeed = q.scope !== 'mine' && q.scope !== 'replies';
+    const geoOr: any[] = [];
 
-    let geoOr: any[] | null = null;
-    if (hasGeo) {
+    if (publicFeed && hasGeo) {
       const latDelta = radiusKm / 111.0;
       const minLat = Math.max(-90, viewerLat - latDelta);
       const maxLat = Math.min(90, viewerLat + latDelta);
@@ -183,59 +184,94 @@ export class RequestsService {
         }
       }
 
-      const orList: any[] = [
-        nearby,
-        { OR: [{ latitude: null }, { longitude: null }] },
-        ...(userId ? [{ authorId: userId }] : []),
-      ];
-
-      if (locationName) {
-        orList.push({
-          location: { equals: locationName, mode: 'insensitive' },
-          latitude: null,
-        });
-      }
-
-      geoOr = orList;
-    } else if (locationName) {
-      geoOr = [
-        { location: { equals: locationName, mode: 'insensitive' } },
-        { location: null },
-        ...(userId ? [{ authorId: userId }] : []),
-      ];
+      geoOr.push(nearby, { latitude: null, longitude: null });
+    } else if (publicFeed) {
+      geoOr.push({ latitude: null, longitude: null });
     }
 
-    if (searchOr && geoOr) where.AND = [{ OR: searchOr }, { OR: geoOr }];
-    else if (searchOr)     where.OR  = searchOr;
-    else if (geoOr)        where.OR  = geoOr;
+    const and: any[] = [];
+    if (searchOr) and.push({ OR: searchOr });
+    if (geoOr.length) and.push({ OR: geoOr });
+    if (locationName) {
+      and.push({
+        OR: [
+          { location: { equals: locationName, mode: 'insensitive' } },
+          { location: null },
+        ],
+      });
+    }
+    if (and.length) where.AND = and;
 
     const page  = Math.max(1, q.page ?? 1);
     const limit = Math.min(100, Math.max(1, q.limit ?? 20));
     const skip  = (page - 1) * limit;
 
-    const [items, total] = await Promise.all([
-      this.prisma.request.findMany({
+    let items: any[];
+    let total: number;
+    if (publicFeed && hasGeo) {
+      const candidates = await this.prisma.request.findMany({
         where,
         orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-        include: {
-          author: { select: { id: true, name: true, image: true } },
-          category: true,
-          _count: { select: { responses: true } },
-        },
-        skip,
-        take: limit,
-      }),
-      this.prisma.request.count({ where }),
-    ]);
+        select: { id: true, latitude: true, longitude: true },
+      });
+      const matchingIds = candidates
+        .filter((request) =>
+          request.latitude == null || request.longitude == null ||
+          haversineKm(
+            viewerLat,
+            viewerLng,
+            request.latitude,
+            request.longitude,
+          ) <= radiusKm,
+        )
+        .map((request) => request.id);
+
+      total = matchingIds.length;
+      const pageIds = matchingIds.slice(skip, skip + limit);
+      const pageItems = pageIds.length
+        ? await this.prisma.request.findMany({
+            where: { id: { in: pageIds } },
+            orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+            include: {
+              author: { select: { id: true, name: true, image: true } },
+              category: true,
+              _count: { select: { responses: true } },
+            },
+          })
+        : [];
+      const itemsById = new Map(pageItems.map((request) => [request.id, request]));
+      items = pageIds.map((id) => itemsById.get(id)).filter(Boolean);
+    } else {
+      [items, total] = await Promise.all([
+        this.prisma.request.findMany({
+          where,
+          orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+          include: {
+            author: { select: { id: true, name: true, image: true } },
+            category: true,
+            _count: { select: { responses: true } },
+          },
+          skip,
+          take: limit,
+        }),
+        this.prisma.request.count({ where }),
+      ]);
+    }
+
+    /*
+     * The exact-distance pass above runs before pagination so results and
+     * pagination totals both reflect the requested circular radius.
+     */
+    const responseItems = userId
+      ? items
+      : items.map((request) => ({
+          ...request,
+          latitude: null,
+          longitude: null,
+        }));
 
     return {
-      items: userId
-        ? items
-        : items.map((request) => ({
-            ...request,
-            latitude: null,
-            longitude: null,
-          })),
+      items: responseItems,
       pagination: {
         page, limit, total,
         totalPages: Math.ceil(total / limit),
