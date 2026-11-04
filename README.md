@@ -64,6 +64,8 @@ The platform is **free** with a **PRO tier** that unlocks unlimited postings and
 ### Requests
 - ✅ Browse and view open requests with `GET /requests` and `GET /requests/:id` without signing in
 - ✅ Authenticated request creation, editing, cancellation, and replies
+- ✅ Location-aware request feeds: pass the viewer's `lat` and `lng` to `GET /requests` (optional `radiusKm`, default 50, maximum 500); requests without coordinates remain visible to everyone
+- ✅ Request coordinates must include both latitude and longitude; omit both to make a request visible regardless of viewer location
 - ✅ Telegram bot request browsing and replies
 
 ### Matching

@@ -7,6 +7,7 @@ import { RedisService } from 'src/redis/redis.service';
 
 export interface MatchResult {
   product: any;
+  matchedFrom: { id: string; title: string };
   score: number;
   reasons: string[];
   wantsMatch: { categoryId: string; keywords?: string | null };
@@ -108,6 +109,7 @@ export class MatchesService {
             category: candidate.category,
             owner: candidate.owner,
           },
+          matchedFrom: { id: myProduct.id, title: myProduct.title },
           score: Math.round(score),
           reasons,
           wantsMatch: {

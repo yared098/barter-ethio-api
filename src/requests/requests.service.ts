@@ -32,6 +32,8 @@ export class RequestsService {
     dto: CreateRequestDto,
     uploadedImages: string[] = [],   // ← NEW: paths returned by the controller
   ) {
+    this._validateCoordinatePair(dto.latitude, dto.longitude, 'Request');
+
     if (dto.budgetMin != null && dto.budgetMax != null &&
         dto.budgetMin > dto.budgetMax) {
       throw new BadRequestException('budgetMin cannot exceed budgetMax');
@@ -141,21 +143,49 @@ export class RequestsService {
     const radiusKm     = q.radiusKm != null ? parseFloat(q.radiusKm) : 50;
     const locationName = q.location?.trim();
 
-    const hasGeo =
-      Number.isFinite(viewerLat) && Number.isFinite(viewerLng) &&
-      radiusKm > 0 && radiusKm <= 500;
+    this._validateCoordinatePair(
+      q.lat == null ? undefined : viewerLat,
+      q.lng == null ? undefined : viewerLng,
+      'Viewer',
+    );
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > 500) {
+      throw new BadRequestException('radiusKm must be greater than 0 and at most 500');
+    }
+
+    const hasGeo = q.lat != null && q.lng != null;
 
     let geoOr: any[] | null = null;
     if (hasGeo) {
       const latDelta = radiusKm / 111.0;
-      const lngDelta = radiusKm / (111.0 * Math.cos((viewerLat * Math.PI) / 180));
+      const minLat = Math.max(-90, viewerLat - latDelta);
+      const maxLat = Math.min(90, viewerLat + latDelta);
+      const lngDelta = radiusKm /
+        (111.0 * Math.cos((viewerLat * Math.PI) / 180));
+      const nearby: any = {
+        latitude: { gte: minLat, lte: maxLat },
+      };
+
+      if (lngDelta < 180 && minLat > -90 && maxLat < 90) {
+        const minLng = viewerLng - lngDelta;
+        const maxLng = viewerLng + lngDelta;
+        if (minLng < -180) {
+          nearby.OR = [
+            { longitude: { gte: minLng + 360 } },
+            { longitude: { lte: maxLng } },
+          ];
+        } else if (maxLng > 180) {
+          nearby.OR = [
+            { longitude: { gte: minLng } },
+            { longitude: { lte: maxLng - 360 } },
+          ];
+        } else {
+          nearby.longitude = { gte: minLng, lte: maxLng };
+        }
+      }
 
       const orList: any[] = [
-        {
-          latitude:  { gte: viewerLat - latDelta, lte: viewerLat + latDelta },
-          longitude: { gte: viewerLng - lngDelta, lte: viewerLng + lngDelta },
-        },
-        { latitude: null, longitude: null },
+        nearby,
+        { OR: [{ latitude: null }, { longitude: null }] },
         ...(userId ? [{ authorId: userId }] : []),
       ];
 
@@ -285,7 +315,12 @@ export class RequestsService {
   //  UPDATE
   // ─────────────────────────────────────────────
   async update(authorId: string, id: string, dto: UpdateRequestDto) {
-    await this._ensureAuthor(authorId, id);
+    const existing = await this._ensureAuthor(authorId, id);
+    this._validateCoordinatePair(
+      dto.latitude ?? existing.latitude ?? undefined,
+      dto.longitude ?? existing.longitude ?? undefined,
+      'Request',
+    );
     return this.prisma.request.update({
       where: { id },
       data: {
@@ -326,6 +361,8 @@ export class RequestsService {
   //  REPLY
   // ─────────────────────────────────────────────
   async reply(responderId: string, requestId: string, dto: ReplyRequestDto) {
+    this._validateCoordinatePair(dto.viewerLat, dto.viewerLng, 'Viewer');
+
     const request = await this.prisma.request.findUnique({
       where: { id: requestId },
       include: { author: true, category: true },
@@ -506,5 +543,26 @@ export class RequestsService {
     if (!r) throw new NotFoundException();
     if (r.authorId !== userId) throw new ForbiddenException();
     return r;
+  }
+
+  private _validateCoordinatePair(
+    latitude: number | undefined,
+    longitude: number | undefined,
+    label: string,
+  ) {
+    if ((latitude == null) !== (longitude == null)) {
+      throw new BadRequestException(`${label} latitude and longitude must be provided together`);
+    }
+    if (latitude == null || longitude == null) return;
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new BadRequestException(`${label} coordinates are outside valid latitude/longitude ranges`);
+    }
   }
 }
