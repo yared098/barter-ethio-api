@@ -26,6 +26,12 @@ export class PaymentsController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('me/history')
+  history(@CurrentUser() user: any) {
+    return this.payments.getHistory(user.id ?? user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get(':paymentId/status')
   status(@CurrentUser() user: any, @Param('paymentId') id: string) {
     return this.payments.getStatus(user.id ?? user.userId, id);

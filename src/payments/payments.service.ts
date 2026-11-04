@@ -222,6 +222,26 @@ export class PaymentsService {
   }
 
   // ─────────────────────────────────────────────────────────
+  // USER PAYMENT HISTORY
+  // ─────────────────────────────────────────────────────────
+  getHistory(userId: string) {
+    return this.prisma.payment.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        plan: true,
+        amount: true,
+        currency: true,
+        status: true,
+        createdAt: true,
+        paidAt: true,
+      },
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────
   // STATUS — polled by the app every 3s
   // ─────────────────────────────────────────────────────────
   async getStatus(userId: string, paymentId: string) {
