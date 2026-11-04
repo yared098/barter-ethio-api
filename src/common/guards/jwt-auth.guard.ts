@@ -9,12 +9,22 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     super();
   }
 
-  canActivate(context: ExecutionContext) {
+  handleRequest<TUser = any>(
+    err: any,
+    user: any,
+    info: any,
+    context: ExecutionContext,
+    status?: any,
+  ): TUser {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) return true;
-    return super.canActivate(context);
+
+    // Public endpoints remain available anonymously, but retain identity when
+    // a valid bearer token is supplied (for personalized public feeds).
+    if (isPublic) return user;
+
+    return super.handleRequest(err, user, info, context, status);
   }
 }
